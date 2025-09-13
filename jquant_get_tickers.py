@@ -20,24 +20,9 @@ from pathlib import Path
 from dotenv import dotenv_values, set_key
 
 config = dotenv_values(".env")
-API_URL = "https://api.jquants.com"
-JQUANT_DATA_FOLDER = "jquant_tickers"
 
-# mkdir
-Path(JQUANT_DATA_FOLDER).mkdir(exist_ok=True, parents=True)
-
-# The free subscription covers the following dates: 2023-06-21 ~ 2025-06-21. 
-# If you want more data, please check other plans:  https://jpx-jquants.com/
-
-dates = [
-    "2023-06-21",
-    "2023-10-21",
-    "2024-02-21",
-    "2024-06-21",
-    "2024-10-21",
-    "2025-02-21",
-    "2025-06-21",
-]
+API_URL             = config.get("API_URL")
+JQUANT_DATA_FOLDER  = config.get("JQUANT_DATA_FOLDER")
 
 def get_idtoken(refresh: bool = False) -> str:
     '''Read jquant id token from .env / get from API if not found.'''
@@ -78,11 +63,20 @@ def get_idtoken(refresh: bool = False) -> str:
     return id_token
 
 
-def get_tickers_for_dates(dates: list[str]):
-    '''Loop through the dates and get a ticker list for each.'''
+def get_tickers_for_dates(dates: list[str]) -> dict:
+    '''Loop through the dates and get a ticker list for each.
+
+    If a file already exists does not get it, otherwise get &
+    write into a file. Returns a dict of list keyed with dates
+    '''
+
+    # mkdir
+    Path(JQUANT_DATA_FOLDER).mkdir(exist_ok=True, parents=True)
 
     id_token = get_idtoken()
     headers = {"Authorization": "Bearer {}".format(id_token)}
+
+    all_tickers = {}
 
     i = 0
     token_error_flag = False
@@ -94,6 +88,12 @@ def get_tickers_for_dates(dates: list[str]):
         tickers_file = (
             f"{JQUANT_DATA_FOLDER}/jquant_tickers_{date.replace('-', '_')}.txt"
         )
+
+        if Path(tickers_file).exists():
+            print(f"{tickers_file} exists, skipping to next date..")
+            all_tickers[date] = Path(tickers_file).read_text().splitlines()
+            i+=1
+            continue
 
         res = requests.get(f"{API_URL}/v1/listed/info", params=params, headers=headers)
 
@@ -111,9 +111,10 @@ def get_tickers_for_dates(dates: list[str]):
                 print(df)
             tickers_df = df[["Code"]]
             tickers_df = tickers_df.drop_duplicates()
+            all_tickers[date] = tickers_df["Code"].tolist()
             tickers_df.to_csv(tickers_file, index=False, header=False)
             print(f"tickers written to {tickers_file}")
-            i = i + 1
+            i += 1
         elif res.status_code == 401 and 'token is invalid or expired' in res.content.decode('utf-8'):
             print("idToken expired or invalid, refreshing.. (usually expires after 24 hours..)")
             if token_error_flag:
@@ -122,10 +123,10 @@ def get_tickers_for_dates(dates: list[str]):
             id_token = get_idtoken(refresh=True)
             headers = {"Authorization": "Bearer {}".format(id_token)}
             token_error_flag = True
-            i = 0
+            i -= 1
             
         else:
             print(res.json())
             sys.exit(1)
 
-get_tickers_for_dates(dates)
+    return all_tickers
