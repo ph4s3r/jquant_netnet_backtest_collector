@@ -43,11 +43,16 @@ for date in tickers:
             endpoint='statements', ticker=ticker, analysisdate=None,
         ):
             data_full[ticker][date]['fs'] = fs
-            # caclulate ncav
-            data_full[ticker][date]['ncav_metrics'] = (
+            # caclulate 1 ncav for the closest date to the analysis date
+            data_full[ticker][date]['ncav_analysisdate'] = (
                 jquant_calculate_ncav.jquant_calculate_ncav(
                     data_full[ticker][date]['fs'], date,
                 )
+            )
+            # or calculate all historical ncav (need to filter for the dates before analysisdate)
+            data_full[ticker][date]['ncav_historical'] = jquant_calculate_ncav.get_historical_ncav_data(
+                data_full[ticker][date]['fs'],
+                date,
             )
         # get balance sheets (needs premium plan...) https://jpx.gitbook.io/j-quants-en/api-reference/statements-1
         data_full[ticker][date]['bs'] = jquant.query_endpoint(

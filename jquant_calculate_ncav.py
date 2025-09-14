@@ -25,7 +25,7 @@ def jquant_calculate_ncav(financial_data: list[dict], analysisdate: str | None) 
             (
                 target - date.fromisoformat(f['DisclosedDate']),
                 date.fromisoformat(f['DisclosedDate']),
-            )
+            ),
         )
         delta = abs((target - date.fromisoformat(f['DisclosedDate'])).days)
         if min_delta_days > delta:
@@ -42,7 +42,7 @@ def jquant_calculate_ncav(financial_data: list[dict], analysisdate: str | None) 
                 'NumberOfIssuedAndOutstandingSharesAtTheEndOfFiscalYearIncludingTreasuryStock',
                 0,
             )
-            or 0
+            or 0,
         )
 
         # Calculate total liabilities
@@ -71,28 +71,23 @@ def jquant_calculate_ncav(financial_data: list[dict], analysisdate: str | None) 
         print(f'Error calculating NCAV: {e}')
         return None
 
+# code written by AI, needs review & test
+# Historical Data Collection
+def get_historical_ncav_data(all_statements: list, years_back: int = 5) -> list:
+    """Collect historical NCAV data for multiple years."""
+    historical_data = []
 
-# this is from gpt or something, need to re-write & test
-# # Historical Data Collection
-# def get_historical_ncav_data(headers, ticker, years_back=5):
-#     """Collect historical NCAV data for multiple years"""
+    if not all_statements:
+        return historical_data
 
-#     historical_data = []
+    # Filter for annual reports only
+    for statement in all_statements:
+        if statement.get('TypeOfCurrentPeriod') == 'FY':  # Full year data
+            ncav_data = jquant_calculate_ncav([statement])
+            if ncav_data:
+                historical_data.append(ncav_data)
 
-#     # Get all financial statements for ticker
-#     all_statements = get_financial_statements(headers, ticker)
+    # Sort by disclosure date (most recent first)
+    historical_data.sort(key=lambda x: x['disclosure_date'], reverse=True)
 
-#     if not all_statements:
-#         return historical_data
-
-#     # Filter for annual reports only
-#     for statement in all_statements:
-#         if statement.get('TypeOfCurrentPeriod') == 'FY':  # Full year data
-#             ncav_data = calculate_ncav([statement])
-#             if ncav_data:
-#                 historical_data.append(ncav_data)
-
-#     # Sort by disclosure date (most recent first)
-#     historical_data.sort(key=lambda x: x['disclosure_date'], reverse=True)
-
-#     return historical_data[:years_back]
+    return historical_data[:years_back]
