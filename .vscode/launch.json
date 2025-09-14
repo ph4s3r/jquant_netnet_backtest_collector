@@ -9,7 +9,7 @@
             "name": "Python Debugger: Current File",
             "type": "debugpy",
             "request": "launch",
-            "program": "jquant_netnet_backtest.py",
+            "program": "main.py",
             "console": "integratedTerminal"
         }
     ]

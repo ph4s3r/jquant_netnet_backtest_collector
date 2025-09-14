@@ -18,10 +18,12 @@ select = ["ALL"]
 ignore = [
     "I001",     # import sorting
     "ANN204",   # init return type annotation
+    "COM812",   # 
     "D107",     # init docsstring
     "D211",     # no-blank-line-before-class
     "D213",     # multi-line-summary-second-line
     "T201",     # print
+    "ERA001",   # code in comment
     "N806",     # UPPERCASE vars
     "BLE001",   # Do not catch blind exception: `Exception`
     "FBT001",   # Boolean-typed positional argument in function definition
