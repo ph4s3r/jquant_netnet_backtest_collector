@@ -23,11 +23,14 @@ class JQuantAPIClient:
             config = dotenv_values('.env')
             cls.API_URL = config.get('API_URL', cls.API_URL)
 
-    def query_endpoint(self, endpoint: str, ticker: str, analysisdate: str | None = None)-> list[dict] | None:
+    def query_endpoint(
+            self, endpoint: str, ticker: str, analysisdate: str | None = None,
+            fromdate: str | None = None, todate: str | None = None
+            )-> list[dict] | None:
         """General API query to Jquants fins endpoints."""
         endpoint_url = f'{self.API_URL}/v1/fins/{endpoint}'
         params = {'code': ticker, 'date': analysisdate} if analysisdate else {'code': ticker}
-
+        params = {'code': ticker, 'from': fromdate, 'to': todate} if fromdate and todate else {'code': ticker}
         response = requests.get(
             endpoint_url, headers=self.HEADERS, params=params, timeout=30,
         )

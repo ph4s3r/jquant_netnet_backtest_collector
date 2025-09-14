@@ -1,5 +1,17 @@
-from datetime import date
+"""Functions to calculate the below from JQuant metrics.
+
+- NCAV
+- TTM (Trailing Twelve Months) dividends
+"""
 from operator import methodcaller
+from datetime import date, timedelta
+
+def to_float(v) -> float:
+    """Convert arbitrary values to float, return 0 if cannot."""
+    try:
+        return float(v)
+    except (ValueError, TypeError):
+        return 0.0
 
 # This function is obsolete, because it uses the free endpoint, but the data here lacks the
 # Current assets (IFRS) data that is Graham's original NCAV calculation is using
@@ -32,12 +44,6 @@ def jquant_find_latest_disclosed_statement_to_analysis_date(
             st = financial_data[i - 1]
             del i, _, financial_data, analysisdate
             break
-
-    def to_float(value) -> float:
-        try:
-            return float(value)
-        except (ValueError, TypeError):
-            return 0.0
 
 
     # Extract balance sheet components (all values are strings)
@@ -79,7 +85,7 @@ def jquant_calculate_ncav(fs_details: list[dict], analysisdate: str | None = Non
         2. Use:
             - Current assets (IFRS)
             - Liabilities (IFRS)   (or sum of current + non-current liabilities if available)
-        3. Return NCAV = Current Assets − Total Liabilities
+        3. Return NCAV = Current Assets - Total Liabilities
     """
     if not fs_details:
         return None
@@ -102,12 +108,6 @@ def jquant_calculate_ncav(fs_details: list[dict], analysisdate: str | None = Non
     else:
         st = fs_details[0] # no analysisdate given, working with the first element
 
-        def to_float(value) -> float:
-            try:
-                return float(value)
-            except (ValueError, TypeError):
-                return 0.0
-
     fs = st.get('FinancialStatement', {})
 
     # Extract required fields
@@ -120,7 +120,7 @@ def jquant_calculate_ncav(fs_details: list[dict], analysisdate: str | None = Non
         noncurrent_liabilities = to_float(fs.get('Non-current liabilities (IFRS)'))
         total_liabilities = current_liabilities + noncurrent_liabilities
 
-    # Calculate NCAV
+    # NCAV
     ncav_total = current_assets - total_liabilities
 
     return {
@@ -132,6 +132,51 @@ def jquant_calculate_ncav(fs_details: list[dict], analysisdate: str | None = Non
         'ncav_total': ncav_total,
     }
 
-def jquant_extract_dividends(dividend_data: dict, analysisdate: str | None) -> dict:
-    """TODO: implement this."""
-    return {}
+def jquant_extract_dividends(dividend_data: dict, analysisdate: str | None = None) -> dict:
+    """Calculate TTM (Trailing Twelve Months) dividends from J-Quants dividend endpoint.
+
+    inputs:
+        - dividend_data: output of /dividends endpoint (dict with "dividend" key containing list of dicts)
+        - analysisdate: the date we would like to run the backtest for: e.g. '2025-09-04'
+
+    Logic:
+        1. Take all dividends with RecordDate within 12 months BEFORE analysisdate.
+        2. Sum DistributionAmount to get TTM dividend.
+    """
+    dividends = dividend_data.get('dividend', [])
+    if not dividends:
+        return {'ttm_dividend': 0.0}
+
+    # Convert analysisdate
+    adate = date.fromisoformat(analysisdate)
+    one_year_ago = adate - timedelta(days=365)
+
+    ttm_dividend = 0.0
+    dividend_records = []
+
+    for d in dividends:
+        record_date_str = d.get('RecordDate')
+        if not record_date_str:
+            continue
+        try:
+            record_date = date.fromisoformat(record_date_str)
+        except ValueError:
+            continue
+
+        # Filter: record_date must be within last 12 months before analysisdate
+        if one_year_ago <= record_date <= adate:
+            amount = to_float(d.get('DistributionAmount'))
+            ttm_dividend += amount
+            dividend_records.append({
+                'record_date': record_date_str,
+                'distribution_amount': amount,
+                'ex_date': d.get('ExDate'),
+                'announcement_date': d.get('AnnouncementDate')
+            })
+
+    return {
+        'ttm_dividend': ttm_dividend,
+        'dividend_count': len(dividend_records),
+        'dividend_records': dividend_records
+    }
+
