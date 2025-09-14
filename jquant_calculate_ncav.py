@@ -67,7 +67,7 @@ def jquant_find_latest_disclosed_statement_to_analysis_date(
     }
 
 # This one should be fine
-def jquant_calculate_ncav(fs_details: list[dict], analysisdate: str | None) -> dict:
+def jquant_calculate_ncav(fs_details: list[dict], analysisdate: str | None = None) -> dict:
     """Calculate NCAV (Net Current Asset Value) from J-Quants fs_details endpoint.
 
     inputs:
@@ -83,27 +83,30 @@ def jquant_calculate_ncav(fs_details: list[dict], analysisdate: str | None) -> d
     """
     if not fs_details:
         return None
+    st = None
+    if analysisdate:
+        # sort by disclosure date
+        fs_details.sort(key=methodcaller('get', 'DisclosedDate', ''))
 
-    # sort by disclosure date
-    fs_details.sort(key=methodcaller('get', 'DisclosedDate', ''))
+        analysisdate = date.fromisoformat(analysisdate)
 
-    analysisdate = date.fromisoformat(analysisdate)
-
-    # find latest statement before analysis date
-    for i, record in enumerate(fs_details):
-        if (date.fromisoformat(record['DisclosedDate']) - analysisdate).days > 0:
-            st = fs_details[i - 1]
-            del i, record, fs_details, analysisdate
-            break
+        # find latest statement before analysis date
+        for i, record in enumerate(fs_details):
+            if (date.fromisoformat(record['DisclosedDate']) - analysisdate).days > 0:
+                st = fs_details[i - 1]
+                del i, record, fs_details, analysisdate
+                break
+        else:
+            # if no future record found, take the last one
+            st = fs_details[-1]
     else:
-        # if no future record found, take the last one
-        st = fs_details[-1]
+        st = fs_details[0] # no analysisdate given, working with the first element
 
-    def to_float(value) -> float:
-        try:
-            return float(value)
-        except (ValueError, TypeError):
-            return 0.0
+        def to_float(value) -> float:
+            try:
+                return float(value)
+            except (ValueError, TypeError):
+                return 0.0
 
     fs = st.get('FinancialStatement', {})
 

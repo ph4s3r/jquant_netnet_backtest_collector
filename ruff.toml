@@ -28,6 +28,7 @@ ignore = [
     "BLE001",   # Do not catch blind exception: `Exception`
     "FBT001",   # Boolean-typed positional argument in function definition
     "FBT002",   # Boolean default positional argument in function definition
+    "PGH004",   # use top noqa
     ]
 
 extend-select = ["E501"]

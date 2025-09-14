@@ -115,7 +115,7 @@ def get_tickers_for_dates(dates: list[str]) -> dict:
             tickers_df.to_csv(tickers_file, index=False, header=False)
             print(f'tickers written to {tickers_file}')
             i += 1
-        elif res.status_code == 401 and 'token is invalid or expired' in res.content.decode('utf-8'):
+        elif res.status_code == HTTPStatus.UNAUTHORIZED and 'token is invalid or expired' in res.content.decode('utf-8'):
             print('idToken expired or invalid, refreshing.. (usually expires after 24 hours..)')
             if token_error_flag:
                 print('cannot refresh token, check subscription, exiting..')
