@@ -3,10 +3,11 @@
 - NCAV
 - TTM (Trailing Twelve Months) dividends
 """
+from typing import Any
 from operator import methodcaller
 from datetime import date, timedelta
 
-def to_float(v) -> float:
+def to_float(v: Any) -> float:
     """Convert arbitrary values to float, return 0 if cannot."""
     try:
         return float(v)

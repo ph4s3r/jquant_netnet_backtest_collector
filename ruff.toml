@@ -23,6 +23,11 @@ ignore = [
     "D211",     # no-blank-line-before-class
     "D213",     # multi-line-summary-second-line
     "T201",     # print
+    "PLC0206",  # dict keys
+    "ANN001",   # allow Any
+    "TD002",    # TODO stuff
+    "TD003",    # TODO stuff
+    "FIX002",   # TODO stuff
     "ERA001",   # code in comment
     "N806",     # UPPERCASE vars
     "BLE001",   # Do not catch blind exception: `Exception`
