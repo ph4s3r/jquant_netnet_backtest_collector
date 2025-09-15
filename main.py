@@ -24,12 +24,11 @@ print('-- Running NETNET Backtest --')
 
 analysis_dates = [
     '2024-12-21',
-    # '2023-12-21',
-    # '2024-02-21',
-    # '2024-06-21',
-    # '2024-10-21',
-    # '2025-02-21',
-    # '2025-06-21',
+    '2022-12-21',
+    '2020-12-21',
+    '2018-12-21',
+    '2016-12-21',
+    '2014-12-21',
 ]
 
 jquant = jquant_client.JQuantAPIClient()
@@ -91,9 +90,13 @@ for analysis_date in tickers:
         ohlc_params = {'code': ticker, 'date': ncavdatadate}
         if ohlc_data_for_ncav_date := jquant.query_ohlc(params=ohlc_params):
             data_full[ticker][analysis_date]['share_price_at_ncav_date'] = ohlc_data_for_ncav_date[0].get('Close', 0.0)
+            if not data_full[ticker][analysis_date]['share_price_at_ncav_date']:
+                # TODO: get price from somehow / somewhere else because it can be None
+                continue
 
         # the asset is netnet if the share price is less than 67% of the ncavps
-        data_full[ticker][analysis_date]['netnet'] = data_full[ticker][analysis_date]['share_price_at_ncav_date'] < (
+        data_full[ticker][analysis_date]['netnet'] = \
+        data_full[ticker][analysis_date].get('share_price_at_ncav_date', 999999) < (
             data_full[ticker][analysis_date]['ncavps'] * 0.67
         )
         if data_full[ticker][analysis_date]['netnet']:
