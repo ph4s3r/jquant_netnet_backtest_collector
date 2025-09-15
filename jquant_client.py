@@ -8,15 +8,14 @@ from dotenv import dotenv_values, set_key
 
 
 class JQuantAPIClient:
-
     """Manage JQuant API Calls."""
 
-    HEADERS             = ''
-    API_URL             = ''
-    IDTOKEN             = ''
-    EMAIL               = ''
-    PASS                = ''
-    JQUANT_DATA_FOLDER  = ''
+    HEADERS = ''
+    API_URL = ''
+    IDTOKEN = ''
+    EMAIL = ''
+    PASS = ''
+    JQUANT_DATA_FOLDER = ''
 
     def __init__(self) -> None:
         self.classinit()
@@ -151,11 +150,7 @@ class JQuantAPIClient:
 
         return all_tickers
 
-    def query_endpoint(
-        self,
-        endpoint: str,
-        params: dict
-    ) -> list[dict] | None:
+    def query_endpoint(self, endpoint: str, params: dict) -> list[dict] | None:
         """General API query to Jquants fins endpoints.
 
         Uses *params for arbitrary URL query parameters
@@ -184,6 +179,40 @@ class JQuantAPIClient:
                 print(f'{len(data)} {endpoint} acquired for {params=}')
                 return data
             print(f'empty {endpoint} data for {params=}')
+            return None
+        print(f'Error: {response.status_code} - {response.text}')
+        return None
+
+    def query_ohlc(self, params: dict) -> list[dict] | None:
+        """General API query to Jquants fins endpoints.
+
+        Uses *params for arbitrary URL query parameters
+        """
+        stub = 'daily_quotes'
+        endpoint_url = f'{self.API_URL}/v1//prices/{stub}'
+        response = requests.get(
+            endpoint_url,
+            headers=self.HEADERS,
+            params=params,
+            timeout=30,
+        )
+        response.raise_for_status()
+        if response.status_code == HTTPStatus.OK:
+            data = []
+            if response.json()[stub]:
+                data += response.json()[stub]
+                while 'pagination_key' in response.json():
+                    params['pagination_key'] = response.json()['pagination_key']
+                    response = requests.get(
+                        endpoint_url,
+                        headers=self.HEADERS,
+                        params=params,
+                        timeout=30,
+                    )
+                    data += response.json()[stub]
+                print(f'{len(data)} {stub} acquired for {params=}')
+                return data
+            print(f'empty {stub} data for {params=}')
             return None
         print(f'Error: {response.status_code} - {response.text}')
         return None
