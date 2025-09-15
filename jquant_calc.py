@@ -55,13 +55,26 @@ def jquant_calculate_ncav(fs_details: list[dict], analysisdate: str | None = Non
     no_liabilities_data = False
 
     # Extract required fields
-    current_assets = to_float(st.get('Current assets (IFRS)'))
-    total_liabilities = to_float(st.get('Liabilities (IFRS)'))
+    current_assets = to_float(
+        st['FinancialStatement'].get('Current assets (IFRS)') or st['FinancialStatement'].get('Current assets')
+    )
+    total_liabilities = to_float(
+        st['FinancialStatement'].get('Liabilities (IFRS)') or st['FinancialStatement'].get('Liabilities')
+    )
+
+    if not current_assets:
+        return {}
 
     # Fallback: if total liabilities missing, sum CL + NCL if available
     if not total_liabilities:
-        current_liabilities = to_float(st.get('Current liabilities (IFRS)'))
-        noncurrent_liabilities = to_float(st.get('Non-current liabilities (IFRS)'))
+        current_liabilities = to_float(
+            st['FinancialStatement'].get('Current liabilities (IFRS)')
+            or st['FinancialStatement'].get('Current liabilities')
+        )
+        noncurrent_liabilities = to_float(
+            st['FinancialStatement'].get('Non-current liabilities (IFRS)')
+            or st['FinancialStatement'].get('Non-current liabilities')
+        )
         if not current_liabilities or not noncurrent_liabilities:
             no_liabilities_data = True
         else:
@@ -74,8 +87,8 @@ def jquant_calculate_ncav(fs_details: list[dict], analysisdate: str | None = Non
 
     return {
         'fs_disclosure_date': st.get('DisclosedDate'),
-        'fs_report_type': st.get('TypeOfDocument'),
-        'fs_period_type': st.get('Type of current period, DEI'),
+        'fs_period_type': st['FinancialStatement'].get('Type of current period, DEI'),
+        'fs_current_fiscal_year_end': st['FinancialStatement'].get('Current fiscal year end date, DEI'),
         'fs_current_assets': current_assets,
         'fs_total_liabilities': total_liabilities,
         'fs_ncav_total': ncav_total,
@@ -123,7 +136,7 @@ def jquant_extract_os(statements: list[dict], analysisdate: str | None = None) -
     return {
         'st_disclosure_date': st.get('DisclosedDate'),
         'st_report_type': st.get('TypeOfDocument'),
-        'st_period_type': st.get('Type of current period, DEI'),
+        'st_period_type': st.get('TypeOfCurrentPeriod'),
         'st_total_assets': total_assets,
         'st_equity': equity,
         'st_NumberOfIssuedAndOutstandingSharesAtTheEndOfFiscalYearIncludingTreasuryStock': shares_outstanding,
@@ -141,8 +154,7 @@ def jquant_extract_dividends(dividend_data: dict, analysisdate: str | None = Non
         1. Take all dividends with RecordDate within 12 months BEFORE analysisdate.
         2. Sum DistributionAmount to get TTM dividend.
     """
-    dividends = dividend_data.get('dividend', [])
-    if not dividends:
+    if not dividend_data:
         return {'ttm_dividend': 0.0}
 
     # Convert analysisdate
@@ -152,7 +164,7 @@ def jquant_extract_dividends(dividend_data: dict, analysisdate: str | None = Non
     ttm_dividend = 0.0
     dividend_records = []
 
-    for d in dividends:
+    for d in dividend_data:
         record_date_str = d.get('RecordDate')
         if not record_date_str:
             continue

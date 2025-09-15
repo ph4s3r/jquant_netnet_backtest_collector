@@ -11,8 +11,8 @@ class JQuantAPIClient:
     """Manage JQuant API Calls."""
 
     HEADERS = ''
-    API_URL = ''
     IDTOKEN = ''
+    API_URL = ''
     EMAIL = ''
     PASS = ''
     JQUANT_DATA_FOLDER = ''
@@ -28,7 +28,8 @@ class JQuantAPIClient:
             cls.API_URL = config.get('API_URL', cls.API_URL)
         if cls.IDTOKEN == '':
             cls.IDTOKEN = config.get('IDTOKEN')
-            print('idToken read successfully')
+        if cls.HEADERS == '':
+            cls.HEADERS = {'Authorization': f'Bearer {cls.IDTOKEN}'}
         if cls.EMAIL == '':
             cls.EMAIL = config.get('EMAIL')
         if cls.PASS == '':
@@ -36,17 +37,30 @@ class JQuantAPIClient:
         if cls.JQUANT_DATA_FOLDER == '':
             cls.JQUANT_DATA_FOLDER = config.get('JQUANT_DATA_FOLDER')
 
-    def get_idtoken(self, refresh: bool = False) -> str:
+        # --- test dummy endpoint ---
+        test_headers = {'Authorization': f'Bearer {cls.IDTOKEN}'}
+        res = requests.get(
+            f'{cls.API_URL}/v1/listed/info',
+            params={'code': 'DUMMY', 'date': '1900-01-01'},
+            headers=test_headers,
+            timeout=10,
+        )
+        if res.status_code == HTTPStatus.UNAUTHORIZED:
+            print('Token expired or does not exist, refreshing...')
+            cls.get_idtoken(refresh=True)
+
+    @classmethod
+    def get_idtoken(cls, refresh: bool = False) -> str:
         """Read jquant id token from .env / get from API if not found."""
         if not refresh:
-            return {'Authorization': f'Bearer {self.IDTOKEN}'}
+            return {'Authorization': f'Bearer {cls.IDTOKEN}'}
 
-        USER_DATA = {'mailaddress': self.EMAIL, 'password': self.PASS}
+        USER_DATA = {'mailaddress': cls.EMAIL, 'password': cls.PASS}
 
         # refresh token取得
         try:
             res = requests.post(
-                f'{self.API_URL}/v1/token/auth_user',
+                f'{cls.API_URL}/v1/token/auth_user',
                 data=json.dumps(USER_DATA),
                 timeout=30,
             )
@@ -61,7 +75,7 @@ class JQuantAPIClient:
         # id token取得
         try:
             res = requests.post(
-                f'{self.API_URL}/v1/token/auth_refresh?refreshtoken={refresh_token}',
+                f'{cls.API_URL}/v1/token/auth_refresh?refreshtoken={refresh_token}',
                 timeout=30,
             )
             res.raise_for_status()
@@ -73,7 +87,7 @@ class JQuantAPIClient:
             sys.exit(1)
         print('idToken acquired successfully')
         set_key('.env', 'IDTOKEN', id_token)
-        self.HEADERS = id_token
+        cls.HEADERS = id_token
         return id_token
 
     def get_tickers_for_dates(self, analysis_dates: list[str]) -> dict:
@@ -162,7 +176,6 @@ class JQuantAPIClient:
             params=params,
             timeout=30,
         )
-        response.raise_for_status()
         if response.status_code == HTTPStatus.OK:
             data = []
             if response.json()[endpoint]:
@@ -189,7 +202,7 @@ class JQuantAPIClient:
         Uses *params for arbitrary URL query parameters
         """
         stub = 'daily_quotes'
-        endpoint_url = f'{self.API_URL}/v1//prices/{stub}'
+        endpoint_url = f'{self.API_URL}/v1/prices/{stub}'
         response = requests.get(
             endpoint_url,
             headers=self.HEADERS,

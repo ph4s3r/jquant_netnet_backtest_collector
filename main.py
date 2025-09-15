@@ -9,12 +9,13 @@ Given a list of selected dates,
 """
 
 # built-in
+import datetime
 from collections import defaultdict
+from pathlib import Path
 
 # local
 import jquant_calc
 import jquant_client
-import datetime
 
 print('-- Running NETNET Backtest --')
 
@@ -44,12 +45,16 @@ data_full = defaultdict(lambda: defaultdict(dict))
 for analysis_date in tickers:
     for ticker in tickers[analysis_date]:
         # NCAV data from https://jpx.gitbook.io/j-quants-en/api-reference/statements-1
-        st_params = {'ticker': ticker, 'analysisdate': analysis_date}
+        # st_params = {'code': ticker, 'date': analysis_date}
+        st_params = {'code': ticker}
         if fs_details := jquant.query_endpoint(endpoint='fs_details', params=st_params):
-            data_full[ticker][analysis_date] = jquant_calc.jquant_calculate_ncav(
+            ncav_data = jquant_calc.jquant_calculate_ncav(
                 fs_details=fs_details,
                 analysisdate=analysis_date,
             )
+            data_full[ticker][analysis_date].update(ncav_data)
+        else:
+            continue # no fs_details, skip to next ticker
 
         # for NCAVPS: getting outstanding shares from https://jpx.gitbook.io/j-quants-en/api-reference/statements
         if statements := jquant.query_endpoint(endpoint='statements', params=st_params):
@@ -65,7 +70,7 @@ for analysis_date in tickers:
                 'fs_ncav_total', 0.0
             ) / data_full[ticker][analysis_date].get(
                 'st_NumberOfIssuedAndOutstandingSharesAtTheEndOfFiscalYearIncludingTreasuryStock'
-            )  # noqa: E501
+            )
             if not data_full[ticker][analysis_date].get('fs_ncav_total', 0.0):
                 raise ZeroDivisionError
         except ZeroDivisionError:
@@ -73,27 +78,36 @@ for analysis_date in tickers:
 
         # Also take note of the skew between disclosure dates of the detailed balance sheet where NCAV is coming from
         # and the number of shares report / fiscal year end
-        fiscalyearenddate = data_full[ticker][analysis_date]['st_CurrentFiscalYearEndDate']
-        ncavdatadate = data_full[ticker][analysis_date]['fs_disclosure_date']
-        data_full[ticker][analysis_date]['fs_st_skew_days'] = (
-            datetime.date.fromisoformat(fiscalyearenddate) - datetime.date.fromisoformat(ncavdatadate)
-        ).days
+        fiscalyearenddate = data_full[ticker][analysis_date].get('st_disclosure_date')
+        ncavdatadate = data_full[ticker][analysis_date].get('fs_disclosure_date')
+        if fiscalyearenddate and ncavdatadate:
+            data_full[ticker][analysis_date]['fs_st_skew_days'] = (
+                datetime.date.fromisoformat(fiscalyearenddate) - datetime.date.fromisoformat(ncavdatadate)
+            ).days
+        else:
+            data_full[ticker][analysis_date]['fs_st_skew_days'] = -999999
 
         # get the share price for the day of the ncav data
-        ohlc_params = {'ticker': ticker, 'analysisdate': ncavdatadate}
+        ohlc_params = {'code': ticker, 'date': ncavdatadate}
         if ohlc_data_for_ncav_date := jquant.query_ohlc(params=ohlc_params):
-            data_full[ticker][analysis_date]['share_price_at_ncav_date'] = ohlc_data_for_ncav_date.get('Close', 0.0)
+            data_full[ticker][analysis_date]['share_price_at_ncav_date'] = ohlc_data_for_ncav_date[0].get('Close', 0.0)
 
         # the asset is netnet if the share price is less than 67% of the ncavps
-        data_full[ticker][analysis_date]['netnet'] = data_full[ticker][analysis_date]['share_price_at_ncav_date'] > (
+        data_full[ticker][analysis_date]['netnet'] = data_full[ticker][analysis_date]['share_price_at_ncav_date'] < (
             data_full[ticker][analysis_date]['ncavps'] * 0.67
-        )  # noqa: E501
+        )
+        if data_full[ticker][analysis_date]['netnet']:
+            print('netnet stock found!')
+            # need to write into file: ticker, date, price
+            netnet_str = f"{ticker},{analysis_date},{data_full[ticker][analysis_date]['share_price_at_ncav_date']}\n"
+            with Path(r'jquant_netnet/tse_netnets.txt').open('a', encoding='utf-8') as f:
+                f.write(netnet_str)
 
-        # get dividends from https://jpx.gitbook.io/j-quants-en/api-reference/dividend
-        # for 2 years back from the analysis date
+            # get dividends from https://jpx.gitbook.io/j-quants-en/api-reference/dividend
+            # for 2 years back from the analysis date
         isodate = datetime.date.fromisoformat(analysis_date)
         div_fromdate = isodate.replace(year=isodate.year - 2)
-        dividend_params = {'ticker': ticker, 'from': div_fromdate, 'to': analysis_date}
+        dividend_params = {'code': ticker, 'from': div_fromdate, 'to': analysis_date}
         if dividend_data := jquant.query_endpoint(endpoint='dividend', params=dividend_params):
             dividend_fields = jquant_calc.jquant_extract_dividends(
                 dividend_data=dividend_data,
