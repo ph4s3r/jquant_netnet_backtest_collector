@@ -18,7 +18,8 @@ select = ["ALL"]
 ignore = [
     "I001",     # import sorting
     "ANN204",   # init return type annotation
-    "COM812",   # 
+    "ANN401",   # allow Any
+    "COM812",   # sanyi
     "D107",     # init docsstring
     "D211",     # no-blank-line-before-class
     "D213",     # multi-line-summary-second-line
