@@ -10,6 +10,7 @@ from tenacity import retry, stop_after_attempt, wait_random_exponential
 import sys
 import json
 import requests
+from typing import NoReturn
 from pathlib import Path
 from http import HTTPStatus
 
@@ -21,8 +22,15 @@ log_cli = get_logger('cli')
 IDTOKEN_ERR_MSG = 'Missing idToken in response.'
 REFRESHTOKEN_ERR_MSG = 'Missing refreshToken in response.'
 
+def _raise_env_error(msg: str) -> NoReturn:
+    log_cli.exception(msg)
+    sys.exit(1)
+
+def _raise_value_error(msg: str) -> NoReturn:
+    raise ValueError(msg)
 
 class JQuantAPIClient:
+
     """Manage JQuant API Calls."""
 
     HEADERS = ''
@@ -67,8 +75,8 @@ class JQuantAPIClient:
                 log_cli.info('Token expired or does not exist, refreshing...')
                 cls.IDTOKEN = cls.get_idtoken(refresh=True)
                 cls.HEADERS = {'Authorization': f'Bearer {cls.IDTOKEN}'}
-        except requests.RequestException as e:
-            log_cli.exception(f'Failed to test endpoint: {e}')
+        except requests.RequestException:
+            log_cli.exception('Failed to test endpoint')
             sys.exit(1)
 
     @classmethod
@@ -89,9 +97,9 @@ class JQuantAPIClient:
             res.raise_for_status()
             refresh_token = res.json().get('refreshToken')
             if refresh_token is None:
-                raise ValueError(REFRESHTOKEN_ERR_MSG)
-        except (requests.RequestException, ValueError) as e:
-            log_cli.exception(f'Failed to get refresh token: {e}')
+                _raise_value_error(REFRESHTOKEN_ERR_MSG)
+        except (requests.RequestException, ValueError):
+            _raise_env_error('Failed to get refresh token')
             sys.exit(1)
 
         # id token取得
@@ -104,9 +112,9 @@ class JQuantAPIClient:
             res.raise_for_status()
             id_token = res.json().get('idToken')
             if id_token is None:
-                raise ValueError(IDTOKEN_ERR_MSG)
-        except (requests.RequestException, ValueError) as e:
-            log_cli.exception(f'Failed to get idToken: {e}')
+                _raise_value_error(IDTOKEN_ERR_MSG)
+        except (requests.RequestException, ValueError):
+            _raise_env_error('Failed to get idToken')
             sys.exit(1)
         log_cli.info('idToken acquired successfully')
         set_key('.env', 'IDTOKEN', id_token)
