@@ -5,6 +5,7 @@ import pandas as pd
 from pathlib import Path
 from http import HTTPStatus
 from dotenv import dotenv_values, set_key
+from tenacity import retry, stop_after_attempt, wait_random_exponential
 
 
 class JQuantAPIClient:
@@ -72,14 +73,7 @@ class JQuantAPIClient:
             print(f'Failed to get refresh token: {e}')
             sys.exit(1)
 
-        # id token取得
-        try:
-            res = requests.post(
-                f'{cls.API_URL}/v1/token/auth_refresh?refreshtoken={refresh_token}',
-                timeout=30,
-            )
-            res.raise_for_status()
-            id_token = res.json().get('idToken')
+            # id token取得
             if id_token is None:
                 raise ValueError('Missing idToken in response.')
         except (requests.RequestException, ValueError) as e:
@@ -90,6 +84,7 @@ class JQuantAPIClient:
         cls.HEADERS = id_token
         return id_token
 
+    @retry(stop=(stop_after_attempt(6)), wait=wait_random_exponential(min=5, max=60))
     def get_tickers_for_dates(self, analysis_dates: list[str]) -> dict:
         """Get all actively traded asset tickers from TSE for given dates using Jquants API.
 
@@ -164,6 +159,7 @@ class JQuantAPIClient:
 
         return all_tickers
 
+    @retry(stop=(stop_after_attempt(6)), wait=wait_random_exponential(min=5, max=60))
     def query_endpoint(self, endpoint: str, params: dict) -> list[dict] | None:
         """General API query to Jquants fins endpoints.
 
@@ -176,6 +172,7 @@ class JQuantAPIClient:
             params=params,
             timeout=30,
         )
+        response.raise_for_status()
         if response.status_code == HTTPStatus.OK:
             data = []
             if response.json()[endpoint]:
@@ -196,6 +193,7 @@ class JQuantAPIClient:
         print(f'Error: {response.status_code} - {response.text}')
         return None
 
+    @retry(stop=(stop_after_attempt(6)), wait=wait_random_exponential(min=5, max=60))
     def query_ohlc(self, params: dict) -> list[dict] | None:
         """General API query to Jquants fins endpoints.
 
