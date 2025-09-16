@@ -1,6 +1,7 @@
 """Jquant API Client."""
 
 # pypi
+import httpx
 import pandas as pd
 from dotenv import dotenv_values, set_key
 from tenacity import retry, stop_after_attempt, wait_random_exponential
@@ -8,34 +9,20 @@ from tenacity import retry, stop_after_attempt, wait_random_exponential
 # built-in
 import sys
 import json
-import uuid
 import requests
 from pathlib import Path
 from http import HTTPStatus
 
-#local
-from structlogger import configure_logging, get_logger
-
-# logger
-# on glacius, log into the var/www folder, otherwise to local logfolder
-LOCAL_LOGDIR = 'jquant_logs/'
-GLACIUS_LOGDIR = r'/var/www/analytics/jquant/'
-
-ON_ELEMENT = 91765249380 == uuid.getnode()
-ON_GLACIUS = 94558092206834 == uuid.getnode()
-
-if ON_GLACIUS:
-    configure_logging(log_dir=GLACIUS_LOGDIR)
-else:
-    configure_logging(log_dir=LOCAL_LOGDIR)
+# local
+from structlogger import get_logger
 
 log_cli = get_logger('cli')
 
 IDTOKEN_ERR_MSG = 'Missing idToken in response.'
 REFRESHTOKEN_ERR_MSG = 'Missing refreshToken in response.'
 
-class JQuantAPIClient:
 
+class JQuantAPIClient:
     """Manage JQuant API Calls."""
 
     HEADERS = ''
@@ -53,7 +40,9 @@ class JQuantAPIClient:
         """Initialize Headers & API_URL only on first instance creation."""
         config = dotenv_values('.env')
         if cls.API_URL == '':
-            cls.API_URL = config.get('API_URL', cls.API_URL)
+            cls.API_URL = config.get('API_URL', '')
+            if not cls.API_URL.startswith(('http://', 'https://')):
+                cls.API_URL = 'https://' + cls.API_URL
         if cls.IDTOKEN == '':
             cls.IDTOKEN = config.get('IDTOKEN')
         if cls.HEADERS == '':
@@ -67,16 +56,20 @@ class JQuantAPIClient:
 
         # --- test dummy endpoint ---
         test_headers = {'Authorization': f'Bearer {cls.IDTOKEN}'}
-        res = requests.get(
-            f'{cls.API_URL}/v1/listed/info',
-            params={'code': 'DUMMY', 'date': '1900-01-01'},
-            headers=test_headers,
-            timeout=10,
-        )
-        if res.status_code == HTTPStatus.UNAUTHORIZED:
-            log_cli.info('Token expired or does not exist, refreshing...')
-            cls.IDTOKEN = cls.get_idtoken(refresh=True)
-            cls.HEADERS = {'Authorization': f'Bearer {cls.IDTOKEN}'}
+        try:
+            res = requests.get(
+                f'{cls.API_URL}/v1/listed/info',
+                params={'code': 'DUMMY', 'date': '1900-01-01'},
+                headers=test_headers,
+                timeout=10,
+            )
+            if res.status_code == HTTPStatus.UNAUTHORIZED:
+                log_cli.info('Token expired or does not exist, refreshing...')
+                cls.IDTOKEN = cls.get_idtoken(refresh=True)
+                cls.HEADERS = {'Authorization': f'Bearer {cls.IDTOKEN}'}
+        except requests.RequestException as e:
+            log_cli.exception(f'Failed to test endpoint: {e}')
+            sys.exit(1)
 
     @classmethod
     def get_idtoken(cls, refresh: bool = True) -> str:
@@ -122,32 +115,16 @@ class JQuantAPIClient:
 
     @retry(stop=(stop_after_attempt(6)), wait=wait_random_exponential(min=5, max=60))
     def get_tickers_for_dates(self, analysis_dates: list[str]) -> dict:
-        """Get all actively traded asset tickers from TSE for given dates using Jquants API.
-
-        https://jpx-jquants.com/
-
-        uses the API endpoint: @title Listed Issue Information (/listed/info)
-
-        inputs:
-            - EMAIL & PASS OR IDTOKEN in .env file (see .env template)
-            - analysis dates
-
-        output:
-            - one txt file with 1 ticker per line per date e.g. /jquant_tickers/jquant_tickers_2023_06_21.txt
-        """
-        # mkdir
+        """Get all actively traded asset tickers from TSE for given dates using Jquants API."""
         Path(self.JQUANT_DATA_FOLDER).mkdir(exist_ok=True, parents=True)
 
         headers = {'Authorization': f'Bearer {self.IDTOKEN}'}
-
         all_tickers = {}
-
         i = 0
         token_error_flag = False
 
         while i < len(analysis_dates):
             date = analysis_dates[i]
-
             params = {'date': date}
             tickers_file = f'{self.JQUANT_DATA_FOLDER}/jquant_tickers_{date.replace("-", "_")}.txt'
 
@@ -158,7 +135,6 @@ class JQuantAPIClient:
                 continue
 
             res = requests.get(f'{self.API_URL}/v1/listed/info', params=params, headers=headers, timeout=30)
-
             if res.status_code == HTTPStatus.OK:
                 d = res.json()
                 data = d['info']
@@ -188,7 +164,6 @@ class JQuantAPIClient:
                 headers = {'Authorization': f'Bearer {id_token}'}
                 token_error_flag = True
                 i -= 1
-
             else:
                 log_cli.info(res.json())
                 sys.exit(1)
@@ -196,70 +171,66 @@ class JQuantAPIClient:
         return all_tickers
 
     @retry(stop=(stop_after_attempt(6)), wait=wait_random_exponential(min=5, max=60))
-    def query_endpoint(self, endpoint: str, params: dict) -> list[dict] | None:
-        """General API query to Jquants fins endpoints.
-
-        Uses *params for arbitrary URL query parameters
-        """
+    async def query_endpoint(self, endpoint: str, params: dict) -> list[dict] | None:
+        """General API query to Jquants fins endpoints."""
         endpoint_url = f'{self.API_URL}/v1/fins/{endpoint}'
-        response = requests.get(
-            endpoint_url,
-            headers=self.HEADERS,
-            params=params,
-            timeout=30,
-        )
-        response.raise_for_status()
-        if response.status_code == HTTPStatus.OK:
-            data = []
-            if response.json()[endpoint]:
-                data += response.json()[endpoint]
-                while 'pagination_key' in response.json():
-                    params['pagination_key'] = response.json()['pagination_key']
-                    response = requests.get(
-                        endpoint_url,
-                        headers=self.HEADERS,
-                        params=params,
-                        timeout=30,
-                    )
+        async with httpx.AsyncClient() as client:
+            response = await client.get(
+                endpoint_url,
+                headers=self.HEADERS,
+                params=params,
+                timeout=30,
+            )
+            response.raise_for_status()
+            if response.status_code == HTTPStatus.OK:
+                data = []
+                if response.json()[endpoint]:
                     data += response.json()[endpoint]
-                log_cli.info(f'{len(data)} {endpoint} acquired for {params=}')
-                return data
-            log_cli.warning(f'empty {endpoint} data for {params=}')
+                    while 'pagination_key' in response.json():
+                        params['pagination_key'] = response.json()['pagination_key']
+                        response = await client.get(
+                            endpoint_url,
+                            headers=self.HEADERS,
+                            params=params,
+                            timeout=30,
+                        )
+                        data += response.json()[endpoint]
+                    # log_cli.info(f'{len(data)} {endpoint} acquired for {params=}')
+                    return data
+                # log_cli.warning(f'empty {endpoint} data for {params=}')
+                return None
+            log_cli.exception(f'Error: {response.status_code} - {response.text}')
             return None
-        log_cli.exception(f'Error: {response.status_code} - {response.text}')
-        return None
 
     @retry(stop=(stop_after_attempt(6)), wait=wait_random_exponential(min=5, max=60))
-    def query_ohlc(self, params: dict) -> list[dict] | None:
-        """General API query to Jquants fins endpoints.
-
-        Uses *params for arbitrary URL query parameters
-        """
+    async def query_ohlc(self, params: dict) -> list[dict] | None:
+        """General API query to Jquants prices endpoints."""
         stub = 'daily_quotes'
         endpoint_url = f'{self.API_URL}/v1/prices/{stub}'
-        response = requests.get(
-            endpoint_url,
-            headers=self.HEADERS,
-            params=params,
-            timeout=30,
-        )
-        response.raise_for_status()
-        if response.status_code == HTTPStatus.OK:
-            data = []
-            if response.json()[stub]:
-                data += response.json()[stub]
-                while 'pagination_key' in response.json():
-                    params['pagination_key'] = response.json()['pagination_key']
-                    response = requests.get(
-                        endpoint_url,
-                        headers=self.HEADERS,
-                        params=params,
-                        timeout=30,
-                    )
+        async with httpx.AsyncClient() as client:
+            response = await client.get(
+                endpoint_url,
+                headers=self.HEADERS,
+                params=params,
+                timeout=30,
+            )
+            response.raise_for_status()
+            if response.status_code == HTTPStatus.OK:
+                data = []
+                if response.json()[stub]:
                     data += response.json()[stub]
-                log_cli.info(f'{len(data)} {stub} acquired for {params=}')
-                return data
-            log_cli.warning(f'empty {stub} data for {params=}')
+                    while 'pagination_key' in response.json():
+                        params['pagination_key'] = response.json()['pagination_key']
+                        response = await client.get(
+                            endpoint_url,
+                            headers=self.HEADERS,
+                            params=params,
+                            timeout=30,
+                        )
+                        data += response.json()[stub]
+                    # log_cli.info(f'{len(data)} {stub} acquired for {params=}')
+                    return data
+                # log_cli.warning(f'empty {stub} data for {params=}')
+                return None
+            log_cli.warning(f'Error: {response.status_code} - {response.text}')
             return None
-        log_cli.warning(f'Error: {response.status_code} - {response.text}')
-        return None

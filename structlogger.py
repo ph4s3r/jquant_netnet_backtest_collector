@@ -3,7 +3,7 @@
 import logging
 import structlog
 from pathlib import Path
-from datetime import datetime
+import datetime
 
 
 def configure_logging(log_dir: str = 'jquant_logs') -> None:
@@ -11,18 +11,20 @@ def configure_logging(log_dir: str = 'jquant_logs') -> None:
     # Ensure the log directory exists
     Path(log_dir).mkdir(exist_ok=True, parents=True)
 
-    # Generate a timestamped log file name
-    timestamp = datetime.now().strftime('%Y%m%d_%H%M%S')
-    log_file = Path(log_dir) / Path(f'app{timestamp}.log')
+    # Generate a timestamped log file name in UTC
+    timestamp = datetime.datetime.now(datetime.UTC).strftime('%Y%m%d_%H%M%S')
+    log_file = Path(log_dir) / f'app_{timestamp}.log'
 
     # Create a FileHandler with a Formatter for the desired log format
-    file_handler = logging.FileHandler(log_file, mode='a')
-    file_handler.setFormatter(logging.Formatter('%(timestamp)s [%(level)s] %(logger)s:%(func_name)s %(message)s'))
+    file_handler = logging.FileHandler(log_file, mode='a', encoding='utf-8')
+    file_handler.setFormatter(logging.Formatter('%(asctime)s [%(levelname)s] %(name)s:%(funcName)s %(message)s'))
 
-    # Configure the standard library logging to write to a file
+    # Configure the standard library logging to write to a file only
     logging.basicConfig(
-        level=logging.INFO,
-        handlers=[file_handler],
+        level=logging.INFO,  # Set to INFO to suppress DEBUG messages
+        handlers=[
+            file_handler,  # Log only to file, no console output
+        ],
     )
 
     # Configure structlog to integrate with standard logging
@@ -36,7 +38,6 @@ def configure_logging(log_dir: str = 'jquant_logs') -> None:
                     structlog.processors.CallsiteParameter.FUNC_NAME,
                 }
             ),
-            structlog.processors.TimeStamper(fmt='%Y-%m-%d %H:%M:%S'),  # Add timestamp in string format
             structlog.processors.format_exc_info,  # Handle exception info
             structlog.stdlib.render_to_log_kwargs,  # Render to logging kwargs
         ],
@@ -47,6 +48,6 @@ def configure_logging(log_dir: str = 'jquant_logs') -> None:
     )
 
 
-def get_logger(name: str):  # noqa: ANN201
+def get_logger(name: str) -> structlog.stdlib.BoundLogger:
     """Get a configured structlog logger with the specified name."""
     return structlog.get_logger(name)

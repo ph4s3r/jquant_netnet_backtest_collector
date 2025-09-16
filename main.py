@@ -2,17 +2,21 @@
 
 Given a list of selected dates,
 - Fetch a list of all asset tickers traded on TSE
-- Fetch deatiled balance sheets for each ticker & date
+- Fetch detailed balance sheets for each ticker & date
 - Fetch dividends data
 - Calculate NCAV & TTM dividends
 - Return a list of assets fulfilling a criteria (wip)
 """
 
+# pypi
+import aiofiles
+import asyncio
+
 # built-in
 import uuid
 import datetime
+from asyncio import Lock, Semaphore
 from collections import defaultdict
-from pathlib import Path
 
 # local
 import jquant_calc
@@ -24,8 +28,11 @@ from structlogger import configure_logging, get_logger
 LOCAL_LOGDIR = 'jquant_logs/'
 GLACIUS_LOGDIR = r'/var/www/analytics/jquant/'
 
-ON_ELEMENT = 91765249380 == uuid.getnode()
-ON_GLACIUS = 94558092206834 == uuid.getnode()
+GLACIUS_UUID = 94558092206834
+ELEMENT_UUID = 91765249380
+
+ON_ELEMENT = ELEMENT_UUID == uuid.getnode()
+ON_GLACIUS = GLACIUS_UUID == uuid.getnode()
 
 if ON_GLACIUS:
     configure_logging(log_dir=GLACIUS_LOGDIR)
@@ -51,38 +58,37 @@ analysis_dates = [
     '2008-12-21',
 ]
 
-jquant = jquant_client.JQuantAPIClient()
 
-tickers: dict = jquant.get_tickers_for_dates(analysis_dates=analysis_dates)
-
-# ### get ncav data for each ticker ###
-# https://jpx.gitbook.io/j-quants-pro/api-reference/statements
-
-# keys are created automatically
-data_full = defaultdict(lambda: defaultdict(dict))
-
-for analysis_date in tickers:
-    log_main.info(f'*** Running for analysis date: {analysis_date} ***')
-    for ticker in tickers[analysis_date]:
+async def process_ticker(
+    ticker: str, analysis_date: str, data_full: defaultdict, ohlc_lock: Lock, netnet_lock: Lock, semaphore: Semaphore
+):
+    """Process a single ticker for an analysis date."""
+    async with semaphore:
+        log_main.debug(f'Processing ticker: {ticker} for {analysis_date}')
         # NCAV data from https://jpx.gitbook.io/j-quants-en/api-reference/statements-1
-        # st_params = {'code': ticker, 'date': analysis_date}
         st_params = {'code': ticker}
-        if fs_details := jquant.query_endpoint(endpoint='fs_details', params=st_params):
+        jquant = jquant_client.JQuantAPIClient()
+
+        if fs_details := await jquant.query_endpoint(endpoint='fs_details', params=st_params):
             ncav_data = jquant_calc.jquant_calculate_ncav(
                 fs_details=fs_details,
                 analysisdate=analysis_date,
             )
             data_full[ticker][analysis_date].update(ncav_data)
         else:
-            continue  # no fs_details, skip to next ticker
+            log_main.debug(f'No fs_details for {ticker}')
+            return  # no fs_details, skip to next ticker
 
         # for NCAVPS: getting outstanding shares from https://jpx.gitbook.io/j-quants-en/api-reference/statements
-        if statements := jquant.query_endpoint(endpoint='statements', params=st_params):
+        if statements := await jquant.query_endpoint(endpoint='statements', params=st_params):
             outstanding_shares_data = jquant_calc.jquant_extract_os(
                 statements=statements,
                 analysisdate=analysis_date,
             )
             data_full[ticker][analysis_date].update(outstanding_shares_data)
+        else:
+            log_main.debug(f'No statements for {ticker}')
+            return
 
         # Calculate NCAVPS
         try:
@@ -94,10 +100,10 @@ for analysis_date in tickers:
             if not data_full[ticker][analysis_date].get('fs_ncav_total', 0.0):
                 raise ZeroDivisionError
         except ZeroDivisionError:
-            continue  # skip to the next ticker for efficiency if ncav or outstanding shares is zero
+            log_main.debug(f'ZeroDivisionError for {ticker}: no ncav or shares')
+            return  # skip to next ticker if ncav or outstanding shares is zero
 
-        # Also take note of the skew between disclosure dates of the detailed balance sheet where NCAV is coming from
-        # and the number of shares report / fiscal year end
+        # Also take note of the skew between disclosure dates
         fiscalyearenddate = data_full[ticker][analysis_date].get('st_disclosure_date')
         ncavdatadate = data_full[ticker][analysis_date].get('fs_disclosure_date')
         if fiscalyearenddate and ncavdatadate:
@@ -109,13 +115,17 @@ for analysis_date in tickers:
 
         # get the share price for the day of the ncav data
         ohlc_params = {'code': ticker, 'date': ncavdatadate}
-        if ohlc_data_for_ncav_date := jquant.query_ohlc(params=ohlc_params):
+        if ohlc_data_for_ncav_date := await jquant.query_ohlc(params=ohlc_params):
             data_full[ticker][analysis_date]['share_price_at_ncav_date'] = ohlc_data_for_ncav_date[0].get('Close', 0.0)
             if not data_full[ticker][analysis_date]['share_price_at_ncav_date']:
-                # TODO: get price from somehow / somewhere else because it can be None
-                with Path(f'jquant_logs/no_ohlc_found_{analysis_date}.txt').open('a', encoding='utf-8') as f:
-                    f.write(f'{ticker}\n')
-                continue
+                # TODO: get price from somewhere else because it can be None
+                async with (
+                    ohlc_lock,
+                    aiofiles.open(f'jquant_logs/no_ohlc_found_{analysis_date}.txt', 'a', encoding='utf-8') as f,
+                ):
+                    await f.write(f'{ticker}\n')
+                log_main.debug(f'No OHLC data for {ticker}')
+                return
 
         # the asset is netnet if the share price is less than 67% of the ncavps
         data_full[ticker][analysis_date]['netnet'] = data_full[ticker][analysis_date].get(
@@ -123,22 +133,37 @@ for analysis_date in tickers:
         ) < (data_full[ticker][analysis_date]['ncavps'] * 0.67)
         if data_full[ticker][analysis_date]['netnet']:
             log_main.info('netnet stock found!')
-            # need to write into file: ticker, date, ncavps
-            netnet_str = f'{ticker},{analysis_date},{data_full[ticker][analysis_date]["ncavps"]}\n'
-            with Path(f'jquant_netnet/tse_netnets_{analysis_date}.txt').open('a', encoding='utf-8') as f:
-                f.write(netnet_str)
+            # write to file: ticker, date, ncavps
+            async with (
+                netnet_lock,
+                aiofiles.open(f'jquant_netnet/tse_netnets_{analysis_date}.txt', 'a', encoding='utf-8') as f,
+            ):
+                await f.write(f'{ticker},{analysis_date},{data_full[ticker][analysis_date]["ncavps"]}\n')
+            log_main.debug(f'Wrote netnet data for {ticker}')
 
-            # get dividends from https://jpx.gitbook.io/j-quants-en/api-reference/dividend
-            # for 2 years back from the analysis date
-            # isodate = datetime.date.fromisoformat(analysis_date)
-            # div_fromdate = isodate.replace(year=isodate.year - 2)
-            # dividend_params = {'code': ticker, 'from': div_fromdate, 'to': analysis_date}
-            # if dividend_data := jquant.query_endpoint(endpoint='dividend', params=dividend_params):
-            #     dividend_fields = jquant_calc.jquant_extract_dividends(
-            #         dividend_data=dividend_data,
-            #         analysisdate=analysis_date,
-            #     )
-            #     data_full[ticker][analysis_date].update(dividend_fields)
-    log_main.info(f'*** Finished run for analysis date: {analysis_date} ***')
 
-log_main.info('-- Finished NETNET Backtest --')
+async def main() -> None:
+    """Execute."""
+    jquant = jquant_client.JQuantAPIClient()
+    tickers: dict = jquant.get_tickers_for_dates(analysis_dates=analysis_dates)
+
+    # keys are created automatically
+    data_full = defaultdict(lambda: defaultdict(dict))
+    ohlc_lock = Lock()
+    netnet_lock = Lock()
+    semaphore = Semaphore(2)  # Limit to 10 concurrent API calls
+
+    for analysis_date in tickers:
+        log_main.info(f'*** Running for analysis date: {analysis_date} ***')
+        tasks = [
+            process_ticker(ticker, analysis_date, data_full, ohlc_lock, netnet_lock, semaphore)
+            for ticker in tickers[analysis_date]
+        ]
+        await asyncio.gather(*tasks)
+        log_main.info(f'*** Finished run for analysis date: {analysis_date} ***')
+
+    log_main.info('-- Finished NETNET Backtest --')
+
+
+if __name__ == '__main__':
+    asyncio.run(main())
