@@ -11,17 +11,21 @@ Given a list of selected dates,
 # pypi
 import aiofiles
 import asyncio
+import datetime
 
 # built-in
 import uuid
-import datetime
 from asyncio import Lock, Semaphore
 from collections import defaultdict
+import time
 
 # local
 import jquant_calc
 import jquant_client
 from structlogger import configure_logging, get_logger
+
+# Limit concurrent API calls
+SEMAPHORE_LIMIT = 5
 
 # logger
 # on glacius, log into the var/www folder, otherwise to local logfolder
@@ -34,10 +38,9 @@ ELEMENT_UUID = 91765249380
 ON_ELEMENT = ELEMENT_UUID == uuid.getnode()
 ON_GLACIUS = GLACIUS_UUID == uuid.getnode()
 
-if ON_GLACIUS:
-    configure_logging(log_dir=GLACIUS_LOGDIR)
-else:
-    configure_logging(log_dir=LOCAL_LOGDIR)
+ULTIMATE_LOGDIR = GLACIUS_LOGDIR if ON_GLACIUS else LOCAL_LOGDIR
+
+configure_logging(log_dir=ULTIMATE_LOGDIR)
 
 log_main = get_logger('main')
 log_main.info('-- Running NETNET Backtest --')
@@ -59,8 +62,30 @@ analysis_dates = [
 ]
 
 
-async def process_ticker(
-    ticker: str, analysis_date: str, data_full: defaultdict, ohlc_lock: Lock, netnet_lock: Lock, semaphore: Semaphore
+async def periodic_perf_logger(
+    perf_log_file: str,
+    analysis_date: str,
+    semaphore_limit: int,
+    tickers_processed_counter: dict,
+    stop_event: asyncio.Event,
+) -> None:
+    """Write performance metrics every minute until stop_event is set."""
+    while not stop_event.is_set():
+        await asyncio.sleep(60)  # log every 60s
+        processed = tickers_processed_counter['count']
+        duration = time.time() - tickers_processed_counter['start']
+        tpm = processed / (duration / 60) if duration > 0 else 0
+        async with aiofiles.open(perf_log_file, 'a', encoding='utf-8') as f:
+            await f.write(f'{analysis_date},{semaphore_limit},{processed},{duration:.2f},{tpm:.2f}\n')
+
+
+async def process_ticker(  # noqa: ANN201, PLR0913
+    ticker: str,
+    analysis_date: str,
+    data_full: defaultdict,
+    ohlc_lock: Lock,
+    netnet_lock: Lock,
+    semaphore: Semaphore
 ):
     """Process a single ticker for an analysis date."""
     async with semaphore:
@@ -98,7 +123,7 @@ async def process_ticker(
                 'st_NumberOfIssuedAndOutstandingSharesAtTheEndOfFiscalYearIncludingTreasuryStock'
             )
             if not data_full[ticker][analysis_date].get('fs_ncav_total', 0.0):
-                raise ZeroDivisionError
+                raise ZeroDivisionError  # noqa: TRY301
         except ZeroDivisionError:
             log_main.debug(f'ZeroDivisionError for {ticker}: no ncav or shares')
             return  # skip to next ticker if ncav or outstanding shares is zero
@@ -108,7 +133,8 @@ async def process_ticker(
         ncavdatadate = data_full[ticker][analysis_date].get('fs_disclosure_date')
         if fiscalyearenddate and ncavdatadate:
             data_full[ticker][analysis_date]['fs_st_skew_days'] = (
-                datetime.date.fromisoformat(fiscalyearenddate) - datetime.date.fromisoformat(ncavdatadate)
+                datetime.datetime.fromisoformat(fiscalyearenddate).date() - \
+                datetime.datetime.fromisoformat(ncavdatadate).date()
             ).days
         else:
             data_full[ticker][analysis_date]['fs_st_skew_days'] = -999999
@@ -121,7 +147,7 @@ async def process_ticker(
                 # TODO: get price from somewhere else because it can be None
                 async with (
                     ohlc_lock,
-                    aiofiles.open(f'jquant_logs/no_ohlc_found_{analysis_date}.txt', 'a', encoding='utf-8') as f,
+                    aiofiles.open(f'{ULTIMATE_LOGDIR}/no_ohlc_found_{analysis_date}.txt', 'a', encoding='utf-8') as f,
                 ):
                     await f.write(f'{ticker}\n')
                 log_main.debug(f'No OHLC data for {ticker}')
@@ -136,7 +162,7 @@ async def process_ticker(
             # write to file: ticker, date, ncavps
             async with (
                 netnet_lock,
-                aiofiles.open(f'jquant_netnet/tse_netnets_{analysis_date}.txt', 'a', encoding='utf-8') as f,
+                aiofiles.open(f'{ULTIMATE_LOGDIR}/tse_netnets_{analysis_date}.txt', 'a', encoding='utf-8') as f,
             ):
                 await f.write(f'{ticker},{analysis_date},{data_full[ticker][analysis_date]["ncavps"]}\n')
             log_main.debug(f'Wrote netnet data for {ticker}')
@@ -147,19 +173,43 @@ async def main() -> None:
     jquant = jquant_client.JQuantAPIClient()
     tickers: dict = jquant.get_tickers_for_dates(analysis_dates=analysis_dates)
 
-    # keys are created automatically
     data_full = defaultdict(lambda: defaultdict(dict))
     ohlc_lock = Lock()
     netnet_lock = Lock()
-    semaphore = Semaphore(2)  # Limit to 10 concurrent API calls
+    semaphore = Semaphore(SEMAPHORE_LIMIT)
+
+    timestamp = datetime.datetime.now(datetime.UTC).strftime('%Y%m%d_%H%M%S')
+    perf_log_file = f'{ULTIMATE_LOGDIR}/performance_{timestamp}.csv'
+    async with aiofiles.open(perf_log_file, 'w', encoding='utf-8') as f:
+        await f.write('analysis_date,semaphore_limit,tickers_processed,duration_seconds,tickers_per_minute\n')
 
     for analysis_date in tickers:
         log_main.info(f'*** Running for analysis date: {analysis_date} ***')
-        tasks = [
-            process_ticker(ticker, analysis_date, data_full, ohlc_lock, netnet_lock, semaphore)
-            for ticker in tickers[analysis_date]
-        ]
+        start_time = time.time()
+        tickers_processed_counter = {'count': 0, 'start': start_time}
+        stop_event = asyncio.Event()
+
+        async def counted_process_ticker(
+            ticker: str, *, analysis_date=analysis_date, tickers_processed_counter=tickers_processed_counter
+        ) -> None:
+            await process_ticker(ticker, analysis_date, data_full, ohlc_lock, netnet_lock, semaphore)
+            tickers_processed_counter['count'] += 1
+
+        tasks = [counted_process_ticker(t) for t in tickers[analysis_date]]
+        periodic_logger_task = asyncio.create_task(
+            periodic_perf_logger(perf_log_file, analysis_date, SEMAPHORE_LIMIT, tickers_processed_counter, stop_event)
+        )
+
         await asyncio.gather(*tasks)
+        stop_event.set()
+        await periodic_logger_task  # let it exit gracefully
+
+        duration = time.time() - start_time
+        tpm = len(tasks) / (duration / 60) if duration > 0 else 0
+        async with aiofiles.open(perf_log_file, 'a', encoding='utf-8') as f:
+            await f.write(
+                f'{analysis_date},{SEMAPHORE_LIMIT},{tickers_processed_counter["count"]},{duration:.2f},{tpm:.2f}\n'
+            )
         log_main.info(f'*** Finished run for analysis date: {analysis_date} ***')
 
     log_main.info('-- Finished NETNET Backtest --')
