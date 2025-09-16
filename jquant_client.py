@@ -1,14 +1,36 @@
-import sys
-import json
-import requests
-import structlog
+"""Jquant API Client."""
+
+# pypi
 import pandas as pd
-from pathlib import Path
-from http import HTTPStatus
 from dotenv import dotenv_values, set_key
 from tenacity import retry, stop_after_attempt, wait_random_exponential
 
-log_cli = structlog.get_logger()
+# built-in
+import sys
+import json
+import uuid
+import requests
+from pathlib import Path
+from http import HTTPStatus
+
+#local
+from structlogger import configure_logging, get_logger
+
+# logger
+# on glacius, log into the var/www folder, otherwise to local logfolder
+LOCAL_LOGDIR = 'jquant_logs/'
+GLACIUS_LOGDIR = r'/var/www/analytics/jquant/'
+
+ON_ELEMENT = 91765249380 == uuid.getnode()
+ON_GLACIUS = 94558092206834 == uuid.getnode()
+
+if ON_GLACIUS:
+    configure_logging(log_dir=GLACIUS_LOGDIR)
+else:
+    configure_logging(log_dir=LOCAL_LOGDIR)
+
+log_cli = get_logger('cli')
+
 IDTOKEN_ERR_MSG = 'Missing idToken in response.'
 REFRESHTOKEN_ERR_MSG = 'Missing refreshToken in response.'
 

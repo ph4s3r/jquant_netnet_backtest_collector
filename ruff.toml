@@ -16,6 +16,7 @@ exclude = [
 [lint]
 select = ["ALL"]
 ignore = [
+    "SIM300",   # allow Yoda condition
     "I001",     # import sorting
     "ANN204",   # init return type annotation
     "ANN401",   # allow Any

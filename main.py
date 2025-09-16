@@ -8,10 +8,8 @@ Given a list of selected dates,
 - Return a list of assets fulfilling a criteria (wip)
 """
 
-# pypi
-import structlog
-
 # built-in
+import uuid
 import datetime
 from collections import defaultdict
 from pathlib import Path
@@ -19,9 +17,22 @@ from pathlib import Path
 # local
 import jquant_calc
 import jquant_client
+from structlogger import configure_logging, get_logger
 
 # logger
-log_main = structlog.get_logger()
+# on glacius, log into the var/www folder, otherwise to local logfolder
+LOCAL_LOGDIR = 'jquant_logs/'
+GLACIUS_LOGDIR = r'/var/www/analytics/jquant/'
+
+ON_ELEMENT = 91765249380 == uuid.getnode()
+ON_GLACIUS = 94558092206834 == uuid.getnode()
+
+if ON_GLACIUS:
+    configure_logging(log_dir=GLACIUS_LOGDIR)
+else:
+    configure_logging(log_dir=LOCAL_LOGDIR)
+
+log_main = get_logger('main')
 log_main.info('-- Running NETNET Backtest --')
 
 # The free subscription covers the following dates: 2023-06-21 ~ 2025-06-21.
