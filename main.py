@@ -97,6 +97,8 @@ for analysis_date in tickers:
             data_full[ticker][analysis_date]['share_price_at_ncav_date'] = ohlc_data_for_ncav_date[0].get('Close', 0.0)
             if not data_full[ticker][analysis_date]['share_price_at_ncav_date']:
                 # TODO: get price from somehow / somewhere else because it can be None
+                with Path(f'jquant_logs/no_ohlc_found_{analysis_date}.txt').open('a', encoding='utf-8') as f:
+                    f.write(ticker)
                 continue
 
         # the asset is netnet if the share price is less than 67% of the ncavps
@@ -107,7 +109,7 @@ for analysis_date in tickers:
             print('netnet stock found!')
             # need to write into file: ticker, date, price
             netnet_str = f'{ticker},{analysis_date},{data_full[ticker][analysis_date]["share_price_at_ncav_date"]}\n'
-            with Path(r'jquant_netnet/tse_netnets.txt').open('a', encoding='utf-8') as f:
+            with Path(f'jquant_netnet/tse_netnets_{analysis_date}.txt').open('a', encoding='utf-8') as f:
                 f.write(netnet_str)
 
             # get dividends from https://jpx.gitbook.io/j-quants-en/api-reference/dividend
