@@ -98,7 +98,7 @@ for analysis_date in tickers:
             if not data_full[ticker][analysis_date]['share_price_at_ncav_date']:
                 # TODO: get price from somehow / somewhere else because it can be None
                 with Path(f'jquant_logs/no_ohlc_found_{analysis_date}.txt').open('a', encoding='utf-8') as f:
-                    f.write(ticker)
+                    f.write(f'{ticker}\n')
                 continue
 
         # the asset is netnet if the share price is less than 67% of the ncavps
