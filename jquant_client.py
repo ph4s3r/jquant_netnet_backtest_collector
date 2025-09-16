@@ -1,14 +1,19 @@
 import sys
 import json
 import requests
+import structlog
 import pandas as pd
 from pathlib import Path
 from http import HTTPStatus
 from dotenv import dotenv_values, set_key
 from tenacity import retry, stop_after_attempt, wait_random_exponential
 
+log_cli = structlog.get_logger()
+IDTOKEN_ERR_MSG = 'Missing idToken in response.'
+REFRESHTOKEN_ERR_MSG = 'Missing refreshToken in response.'
 
 class JQuantAPIClient:
+
     """Manage JQuant API Calls."""
 
     HEADERS = ''
@@ -47,11 +52,12 @@ class JQuantAPIClient:
             timeout=10,
         )
         if res.status_code == HTTPStatus.UNAUTHORIZED:
-            print('Token expired or does not exist, refreshing...')
-            cls.get_idtoken(refresh=True)
+            log_cli.info('Token expired or does not exist, refreshing...')
+            cls.IDTOKEN = cls.get_idtoken(refresh=True)
+            cls.HEADERS = {'Authorization': f'Bearer {cls.IDTOKEN}'}
 
     @classmethod
-    def get_idtoken(cls, refresh: bool = False) -> str:
+    def get_idtoken(cls, refresh: bool = True) -> str:
         """Read jquant id token from .env / get from API if not found."""
         if not refresh:
             return {'Authorization': f'Bearer {cls.IDTOKEN}'}
@@ -68,20 +74,28 @@ class JQuantAPIClient:
             res.raise_for_status()
             refresh_token = res.json().get('refreshToken')
             if refresh_token is None:
-                raise ValueError('Missing refreshToken in response.')
+                raise ValueError(REFRESHTOKEN_ERR_MSG)
         except (requests.RequestException, ValueError) as e:
-            print(f'Failed to get refresh token: {e}')
+            log_cli.exception(f'Failed to get refresh token: {e}')
             sys.exit(1)
 
-            # id token取得
+        # id token取得
+        try:
+            res = requests.post(
+                f'{cls.API_URL}/v1/token/auth_refresh',
+                params={'refreshtoken': refresh_token},
+                timeout=30,
+            )
+            res.raise_for_status()
+            id_token = res.json().get('idToken')
             if id_token is None:
-                raise ValueError('Missing idToken in response.')
+                raise ValueError(IDTOKEN_ERR_MSG)
         except (requests.RequestException, ValueError) as e:
-            print(f'Failed to get idToken: {e}')
+            log_cli.exception(f'Failed to get idToken: {e}')
             sys.exit(1)
-        print('idToken acquired successfully')
+        log_cli.info('idToken acquired successfully')
         set_key('.env', 'IDTOKEN', id_token)
-        cls.HEADERS = id_token
+        cls.HEADERS = {'Authorization': f'Bearer {id_token}'}
         return id_token
 
     @retry(stop=(stop_after_attempt(6)), wait=wait_random_exponential(min=5, max=60))
@@ -116,7 +130,7 @@ class JQuantAPIClient:
             tickers_file = f'{self.JQUANT_DATA_FOLDER}/jquant_tickers_{date.replace("-", "_")}.txt'
 
             if Path(tickers_file).exists():
-                print(f'{tickers_file} exists, skipping to next date..')
+                log_cli.info(f'{tickers_file} exists, skipping to next date..')
                 all_tickers[date] = Path(tickers_file).read_text().splitlines()
                 i += 1
                 continue
@@ -133,20 +147,20 @@ class JQuantAPIClient:
                     data += d['info']
                 df = pd.DataFrame(data)
                 if i == 0:
-                    print(f'sample data (for {date}): ')
-                    print(df)
+                    log_cli.info(f'sample data (for {date}): ')
+                    log_cli.info(df)
                 tickers_df = df[['Code']]
                 tickers_df = tickers_df.drop_duplicates()
                 all_tickers[date] = tickers_df['Code'].tolist()
                 tickers_df.to_csv(tickers_file, index=False, header=False)
-                print(f'tickers written to {tickers_file}')
+                log_cli.info(f'tickers written to {tickers_file}')
                 i += 1
             elif res.status_code == HTTPStatus.UNAUTHORIZED and 'token is invalid or expired' in res.content.decode(
                 'utf-8'
             ):
-                print('idToken expired or invalid, refreshing.. (usually expires after 24 hours..)')
+                log_cli.info('idToken expired or invalid, refreshing.. (usually expires after 24 hours..)')
                 if token_error_flag:
-                    print('cannot refresh token, check subscription, exiting..')
+                    log_cli.exception('cannot refresh token, check subscription, exiting..')
                     sys.exit(1)
                 id_token = self.get_idtoken(refresh=True)
                 headers = {'Authorization': f'Bearer {id_token}'}
@@ -154,7 +168,7 @@ class JQuantAPIClient:
                 i -= 1
 
             else:
-                print(res.json())
+                log_cli.info(res.json())
                 sys.exit(1)
 
         return all_tickers
@@ -186,11 +200,11 @@ class JQuantAPIClient:
                         timeout=30,
                     )
                     data += response.json()[endpoint]
-                print(f'{len(data)} {endpoint} acquired for {params=}')
+                log_cli.info(f'{len(data)} {endpoint} acquired for {params=}')
                 return data
-            print(f'empty {endpoint} data for {params=}')
+            log_cli.warning(f'empty {endpoint} data for {params=}')
             return None
-        print(f'Error: {response.status_code} - {response.text}')
+        log_cli.exception(f'Error: {response.status_code} - {response.text}')
         return None
 
     @retry(stop=(stop_after_attempt(6)), wait=wait_random_exponential(min=5, max=60))
@@ -221,9 +235,9 @@ class JQuantAPIClient:
                         timeout=30,
                     )
                     data += response.json()[stub]
-                print(f'{len(data)} {stub} acquired for {params=}')
+                log_cli.info(f'{len(data)} {stub} acquired for {params=}')
                 return data
-            print(f'empty {stub} data for {params=}')
+            log_cli.warning(f'empty {stub} data for {params=}')
             return None
-        print(f'Error: {response.status_code} - {response.text}')
+        log_cli.warning(f'Error: {response.status_code} - {response.text}')
         return None

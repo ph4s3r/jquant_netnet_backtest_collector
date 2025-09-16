@@ -8,6 +8,9 @@ Given a list of selected dates,
 - Return a list of assets fulfilling a criteria (wip)
 """
 
+# pypi
+import structlog
+
 # built-in
 import datetime
 from collections import defaultdict
@@ -17,7 +20,9 @@ from pathlib import Path
 import jquant_calc
 import jquant_client
 
-print('-- Running NETNET Backtest --')
+# logger
+log_main = structlog.get_logger()
+log_main.info('-- Running NETNET Backtest --')
 
 # The free subscription covers the following dates: 2023-06-21 ~ 2025-06-21.
 # If you want more data, please check other plans:  https://jpx-jquants.com/
@@ -46,7 +51,7 @@ tickers: dict = jquant.get_tickers_for_dates(analysis_dates=analysis_dates)
 data_full = defaultdict(lambda: defaultdict(dict))
 
 for analysis_date in tickers:
-    print(f'*** Running for analysis date: {analysis_date} ***')
+    log_main.info(f'*** Running for analysis date: {analysis_date} ***')
     for ticker in tickers[analysis_date]:
         # NCAV data from https://jpx.gitbook.io/j-quants-en/api-reference/statements-1
         # st_params = {'code': ticker, 'date': analysis_date}
@@ -106,7 +111,7 @@ for analysis_date in tickers:
             'share_price_at_ncav_date', 999999
         ) < (data_full[ticker][analysis_date]['ncavps'] * 0.67)
         if data_full[ticker][analysis_date]['netnet']:
-            print('netnet stock found!')
+            log_main.info('netnet stock found!')
             # need to write into file: ticker, date, ncavps
             netnet_str = f'{ticker},{analysis_date},{data_full[ticker][analysis_date]["ncavps"]}\n'
             with Path(f'jquant_netnet/tse_netnets_{analysis_date}.txt').open('a', encoding='utf-8') as f:
@@ -123,6 +128,6 @@ for analysis_date in tickers:
             #         analysisdate=analysis_date,
             #     )
             #     data_full[ticker][analysis_date].update(dividend_fields)
-    print(f'*** Finished run for analysis date: {analysis_date} ***')
+    log_main.info(f'*** Finished run for analysis date: {analysis_date} ***')
 
-print('-- Finished NETNET Backtest --')
+log_main.info('-- Finished NETNET Backtest --')

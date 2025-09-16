@@ -23,7 +23,8 @@ ignore = [
     "D107",     # init docsstring
     "D211",     # no-blank-line-before-class
     "D213",     # multi-line-summary-second-line
-    "T201",     # print
+    # "T201",     # print
+    "G004",      # allow f string in logs (structlog)
     "PLC0206",  # dict keys
     "ANN001",   # allow Any
     "TD002",    # TODO stuff
