@@ -107,8 +107,8 @@ for analysis_date in tickers:
         ) < (data_full[ticker][analysis_date]['ncavps'] * 0.67)
         if data_full[ticker][analysis_date]['netnet']:
             print('netnet stock found!')
-            # need to write into file: ticker, date, price
-            netnet_str = f'{ticker},{analysis_date},{data_full[ticker][analysis_date]["share_price_at_ncav_date"]}\n'
+            # need to write into file: ticker, date, ncavps
+            netnet_str = f'{ticker},{analysis_date},{data_full[ticker][analysis_date]["ncavps"]}\n'
             with Path(f'jquant_netnet/tse_netnets_{analysis_date}.txt').open('a', encoding='utf-8') as f:
                 f.write(netnet_str)
 
