@@ -49,17 +49,15 @@ log_main.info('-- Running NETNET Backtest --')
 # If you want more data, please check other plans:  https://jpx-jquants.com/
 
 analysis_dates = [
-    '2024-12-21',
-    '2023-12-21',
-    '2022-12-21',
     '2021-12-21',
     '2020-12-21',
     '2019-12-21',
     '2018-12-21',
     '2016-12-21',
     '2014-12-21',
-    '2008-12-21',
 ]
+
+analysis_dates.reverse()
 
 
 async def periodic_perf_logger(
