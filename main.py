@@ -50,22 +50,23 @@ log_main.info('-- Running NETNET Backtest --')
 # If you want more data, please check other plans:  https://jpx-jquants.com/
 
 analysis_dates = [
-    '2007-12-21',
+    # '2024-12-21',
     '2006-12-21',
-    '2005-12-21',
-    '2004-12-21',
-    '2003-12-21',
-    '2002-12-21',
-    '2001-12-21',
-    '2000-12-21',
-    '1999-12-21',
+    # '2005-12-21',
+    # '2004-12-21',
+    # '2003-12-21',
+    # '2002-12-21',
+    # '2001-12-21',
+    # '2000-12-21',
+    # '1999-12-21',
 ]
 
 
 async def process_ticker(  # noqa: ANN201, PLR0913
     ticker: str,
     analysis_date: str,
-    data_full: defaultdict,
+    data_calculated: defaultdict,
+    ticker_onetime_data: defaultdict,
     ohlc_lock: Lock,
     netnet_lock: Lock,
     semaphore: Semaphore,
@@ -77,35 +78,41 @@ async def process_ticker(  # noqa: ANN201, PLR0913
         # NCAV data from https://jpx.gitbook.io/j-quants-en/api-reference/statements-1
         st_params = {'code': ticker}
 
-        if fs_details := await jquant.query_endpoint(endpoint='fs_details', params=st_params):
+        if not ticker_onetime_data[ticker]['fs_details']:
+            ticker_onetime_data[ticker]['fs_details'] = await jquant.query_endpoint(endpoint='statements', params=st_params)
+        if ticker_onetime_data[ticker]['fs_details']:
             ncav_data = jquant_calc.jquant_calculate_ncav(
-                fs_details=fs_details,
+                fs_details=ticker_onetime_data[ticker]['fs_details'],
                 analysisdate=analysis_date,
             )
-            data_full[ticker][analysis_date].update(ncav_data)
+            if not ncav_data:
+                return
+            data_calculated[ticker][analysis_date].update(ncav_data)
         else:
             log_main.debug(f'No fs_details for {ticker}')
             return  # no fs_details, skip to next ticker
 
         # for NCAVPS: getting outstanding shares from https://jpx.gitbook.io/j-quants-en/api-reference/statements
-        if statements := await jquant.query_endpoint(endpoint='statements', params=st_params):
+        if not ticker_onetime_data[ticker]['statements']:
+            ticker_onetime_data[ticker]['statements'] = await jquant.query_endpoint(endpoint='statements', params=st_params)
+        if ticker_onetime_data[ticker]['statements']:
             outstanding_shares_data = jquant_calc.jquant_extract_os(
-                statements=statements,
+                statements=ticker_onetime_data[ticker]['statements'],
                 analysisdate=analysis_date,
             )
-            data_full[ticker][analysis_date].update(outstanding_shares_data)
+            data_calculated[ticker][analysis_date].update(outstanding_shares_data)
         else:
             log_main.debug(f'No statements for {ticker}')
             return
 
         # Calculate NCAVPS
         try:
-            data_full[ticker][analysis_date]['ncavps'] = data_full[ticker][analysis_date].get(
+            data_calculated[ticker][analysis_date]['ncavps'] = data_calculated[ticker][analysis_date].get(
                 'fs_ncav_total', 0.0
-            ) / data_full[ticker][analysis_date].get(
+            ) / data_calculated[ticker][analysis_date].get(
                 'st_NumberOfIssuedAndOutstandingSharesAtTheEndOfFiscalYearIncludingTreasuryStock'
             )
-            if not data_full[ticker][analysis_date].get('fs_ncav_total', 0.0):
+            if not data_calculated[ticker][analysis_date].get('fs_ncav_total', 0.0):
                 raise ZeroDivisionError  # noqa: TRY301
         except ZeroDivisionError:
             log_main.debug(f'ZeroDivisionError for {ticker}: no ncav or shares')
@@ -113,7 +120,7 @@ async def process_ticker(  # noqa: ANN201, PLR0913
 
         # Also take note of the skew between disclosure dates
         # fiscalyearenddate = data_full[ticker][analysis_date].get('st_disclosure_date')
-        ncavdatadate = data_full[ticker][analysis_date].get('fs_disclosure_date')
+        ncavdatadate = data_calculated[ticker][analysis_date].get('fs_disclosure_date')
         # if fiscalyearenddate and ncavdatadate:
         #     data_full[ticker][analysis_date]['fs_st_skew_days'] = (
         #         datetime.datetime.fromisoformat(fiscalyearenddate).date() - \
@@ -125,8 +132,8 @@ async def process_ticker(  # noqa: ANN201, PLR0913
         # get the share price for the day of the ncav data
         ohlc_params = {'code': ticker, 'date': ncavdatadate}
         if ohlc_data_for_ncav_date := await jquant.query_ohlc(params=ohlc_params):
-            data_full[ticker][analysis_date]['share_price_at_ncav_date'] = ohlc_data_for_ncav_date[0].get('Close', 0.0)
-            if not data_full[ticker][analysis_date]['share_price_at_ncav_date']:
+            data_calculated[ticker][analysis_date]['share_price_at_ncav_date'] = ohlc_data_for_ncav_date[0].get('Close', 0.0)
+            if not data_calculated[ticker][analysis_date]['share_price_at_ncav_date']:
                 # TODO: get price from somewhere else because it can be None
                 async with (
                     ohlc_lock,
@@ -137,17 +144,17 @@ async def process_ticker(  # noqa: ANN201, PLR0913
                 return
 
         # the asset is netnet if the share price is less than 67% of the ncavps
-        data_full[ticker][analysis_date]['netnet'] = data_full[ticker][analysis_date].get(
+        data_calculated[ticker][analysis_date]['netnet'] = data_calculated[ticker][analysis_date].get(
             'share_price_at_ncav_date', 999999
-        ) < (data_full[ticker][analysis_date]['ncavps'] * 0.67)
-        if data_full[ticker][analysis_date]['netnet']:
+        ) < (data_calculated[ticker][analysis_date]['ncavps'] * 0.67)
+        if data_calculated[ticker][analysis_date]['netnet']:
             log_main.info('netnet stock found!')
             # write to file: ticker, date, ncavps
             async with (
                 netnet_lock,
                 aiofiles.open(f'{ULTIMATE_LOGDIR}/tse_netnets_{analysis_date}.txt', 'a', encoding='utf-8') as f,
             ):
-                await f.write(f'{ticker},{analysis_date},{data_full[ticker][analysis_date]["ncavps"]}\n')
+                await f.write(f'{ticker},{analysis_date},{data_calculated[ticker][analysis_date]["ncavps"]}\n')
             log_main.debug(f'Wrote netnet data for {ticker}')
 
 
@@ -156,7 +163,8 @@ async def main() -> None:
     jquant = jquant_client.JQuantAPIClient()
     tickers: dict = jquant.get_tickers_for_dates(analysis_dates=analysis_dates)
 
-    data_full = defaultdict(lambda: defaultdict(dict))
+    data_calculated = defaultdict(lambda: defaultdict(dict))
+    ticker_onetime_data = defaultdict(lambda: defaultdict(dict))
     ohlc_lock = Lock()
     netnet_lock = Lock()
     semaphore = Semaphore(SEMAPHORE_LIMIT)
@@ -175,7 +183,9 @@ async def main() -> None:
         async def counted_process_ticker(
             ticker: str, *, analysis_date=analysis_date, tickers_processed_counter=tickers_processed_counter
         ) -> None:
-            await process_ticker(ticker, analysis_date, data_full, ohlc_lock, netnet_lock, semaphore, jquant)
+            await process_ticker(
+                ticker, analysis_date, data_calculated, ticker_onetime_data, ohlc_lock, netnet_lock, semaphore, jquant
+            )
             tickers_processed_counter['count'] += 1
 
         tasks = [counted_process_ticker(t) for t in tickers[analysis_date]]

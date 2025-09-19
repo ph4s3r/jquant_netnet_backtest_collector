@@ -10,6 +10,10 @@ from typing import Any
 from operator import methodcaller
 from datetime import date, timedelta
 
+#local
+from structlogger import get_logger
+log_calc = get_logger('calc')
+
 
 def to_float(v: Any) -> float:
     """Convert arbitrary values to float, return 0 if cannot."""
@@ -37,22 +41,28 @@ def jquant_calculate_ncav(fs_details: list[dict], analysisdate: str | None = Non
         return None
     st = None
     if analysisdate:
-        # sort by disclosure date
-        # fs_details.sort(key=methodcaller('get', 'DisclosedDate', ''))
 
         analysisdate = date.fromisoformat(analysisdate)
+
+        # sort by disclosure date
+        fs_details.sort(key=methodcaller('get', 'DisclosedDate', ''))
+
+        if date.fromisoformat(fs_details[0]['DisclosedDate']) > analysisdate:
+            log_calc.info(
+                f"no earlier fs_details found than analysis \
+date for ticker {fs_details[0].get('LocalCode')}, skipping this."
+                )
+            return {}
 
         # find latest statement before analysis date
         for i, record in enumerate(fs_details):
             if (date.fromisoformat(record['DisclosedDate']) - analysisdate).days > 0:
-                st = fs_details[i - 1]
-                del i, record, fs_details, analysisdate
+                st = fs_details[0] if i == 0 else fs_details[i - 1]
+                del i, record, fs_details
                 break
-        else:
-            # if no future record found, take the last one
-            st = fs_details[-1]
     else:
         st = fs_details[0]  # no analysisdate given, working with the first element
+
 
     no_liabilities_data = False
 
