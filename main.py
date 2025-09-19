@@ -22,6 +22,7 @@ import time
 # local
 import jquant_calc
 import jquant_client
+from perflogger import periodic_perf_logger
 from structlogger import configure_logging, get_logger
 
 # Limit concurrent API calls
@@ -49,32 +50,15 @@ log_main.info('-- Running NETNET Backtest --')
 # If you want more data, please check other plans:  https://jpx-jquants.com/
 
 analysis_dates = [
-    '2021-12-21',
-    '2020-12-21',
-    '2019-12-21',
-    '2018-12-21',
-    '2016-12-21',
-    '2014-12-21',
+    '2007-12-21',
+    '2006-12-21',
+    '2005-12-21',
+    '2004-12-21',
+    '2003-12-21',
+    '2002-12-21',
+    '2001-12-21',
+    '2000-12-21',
 ]
-
-analysis_dates.reverse()
-
-
-async def periodic_perf_logger(
-    perf_log_file: str,
-    analysis_date: str,
-    semaphore_limit: int,
-    tickers_processed_counter: dict,
-    stop_event: asyncio.Event,
-) -> None:
-    """Write performance metrics every minute until stop_event is set."""
-    while not stop_event.is_set():
-        await asyncio.sleep(60)  # log every 60s
-        processed = tickers_processed_counter['count']
-        duration = time.time() - tickers_processed_counter['start']
-        tpm = processed / (duration / 60) if duration > 0 else 0
-        async with aiofiles.open(perf_log_file, 'a', encoding='utf-8') as f:
-            await f.write(f'{analysis_date},{semaphore_limit},{processed},{duration:.2f},{tpm:.2f}\n')
 
 
 async def process_ticker(  # noqa: ANN201, PLR0913
@@ -195,7 +179,7 @@ async def main() -> None:
 
         tasks = [counted_process_ticker(t) for t in tickers[analysis_date]]
         periodic_logger_task = asyncio.create_task(
-            periodic_perf_logger(perf_log_file, analysis_date, SEMAPHORE_LIMIT, tickers_processed_counter, stop_event)
+            periodic_perf_logger(60, perf_log_file, analysis_date, SEMAPHORE_LIMIT, tickers_processed_counter, stop_event)
         )
 
         await asyncio.gather(*tasks)
