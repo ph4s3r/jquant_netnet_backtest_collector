@@ -38,7 +38,7 @@ def jquant_calculate_ncav(fs_details: list[dict], analysisdate: str | None = Non
     st = None
     if analysisdate:
         # sort by disclosure date
-        fs_details.sort(key=methodcaller('get', 'DisclosedDate', ''))
+        # fs_details.sort(key=methodcaller('get', 'DisclosedDate', ''))
 
         analysisdate = date.fromisoformat(analysisdate)
 
