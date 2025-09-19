@@ -112,15 +112,15 @@ async def process_ticker(  # noqa: ANN201, PLR0913
             return  # skip to next ticker if ncav or outstanding shares is zero
 
         # Also take note of the skew between disclosure dates
-        fiscalyearenddate = data_full[ticker][analysis_date].get('st_disclosure_date')
+        # fiscalyearenddate = data_full[ticker][analysis_date].get('st_disclosure_date')
         ncavdatadate = data_full[ticker][analysis_date].get('fs_disclosure_date')
-        if fiscalyearenddate and ncavdatadate:
-            data_full[ticker][analysis_date]['fs_st_skew_days'] = (
-                datetime.datetime.fromisoformat(fiscalyearenddate).date() - \
-                datetime.datetime.fromisoformat(ncavdatadate).date()
-            ).days
-        else:
-            data_full[ticker][analysis_date]['fs_st_skew_days'] = -999999
+        # if fiscalyearenddate and ncavdatadate:
+        #     data_full[ticker][analysis_date]['fs_st_skew_days'] = (
+        #         datetime.datetime.fromisoformat(fiscalyearenddate).date() - \
+        #         datetime.datetime.fromisoformat(ncavdatadate).date()
+        #     ).days
+        # else:
+        #     data_full[ticker][analysis_date]['fs_st_skew_days'] = -999999
 
         # get the share price for the day of the ncav data
         ohlc_params = {'code': ticker, 'date': ncavdatadate}
