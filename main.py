@@ -68,14 +68,14 @@ async def process_ticker(  # noqa: ANN201, PLR0913
     data_full: defaultdict,
     ohlc_lock: Lock,
     netnet_lock: Lock,
-    semaphore: Semaphore
+    semaphore: Semaphore,
+    jquant: jquant_client.JQuantAPIClient,
 ):
     """Process a single ticker for an analysis date."""
     async with semaphore:
         log_main.debug(f'Processing ticker: {ticker} for {analysis_date}')
         # NCAV data from https://jpx.gitbook.io/j-quants-en/api-reference/statements-1
         st_params = {'code': ticker}
-        jquant = jquant_client.JQuantAPIClient()
 
         if fs_details := await jquant.query_endpoint(endpoint='fs_details', params=st_params):
             ncav_data = jquant_calc.jquant_calculate_ncav(
@@ -175,12 +175,14 @@ async def main() -> None:
         async def counted_process_ticker(
             ticker: str, *, analysis_date=analysis_date, tickers_processed_counter=tickers_processed_counter
         ) -> None:
-            await process_ticker(ticker, analysis_date, data_full, ohlc_lock, netnet_lock, semaphore)
+            await process_ticker(ticker, analysis_date, data_full, ohlc_lock, netnet_lock, semaphore, jquant)
             tickers_processed_counter['count'] += 1
 
         tasks = [counted_process_ticker(t) for t in tickers[analysis_date]]
         periodic_logger_task = asyncio.create_task(
-            periodic_perf_logger(60, perf_log_file, analysis_date, SEMAPHORE_LIMIT, tickers_processed_counter, stop_event)
+            periodic_perf_logger(
+                60, perf_log_file, analysis_date, SEMAPHORE_LIMIT, tickers_processed_counter, stop_event
+                )
         )
 
         await asyncio.gather(*tasks)
