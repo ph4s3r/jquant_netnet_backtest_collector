@@ -49,16 +49,17 @@ def jquant_calculate_ncav(fs_details: list[dict], analysisdate: str | None = Non
 
         if date.fromisoformat(fs_details[0]['DisclosedDate']) > analysisdate:
             log_calc.info(
-                f"no earlier fs_details found than analysis \
-date for ticker {fs_details[0].get('LocalCode')}, skipping this."
-                )
+                f'no earlier fs_details found than analysis \
+date for ticker {fs_details[0].get("LocalCode")}. Earliest \
+Disclosed Financial Statements is for {fs_details[0]["DisclosedDate"]}. Skipping...'
+            )
             return {}
 
         # find latest statement before analysis date
         for i, record in enumerate(fs_details):
             if (date.fromisoformat(record['DisclosedDate']) - analysisdate).days > 0:
                 st = fs_details[0] if i == 0 else fs_details[i - 1]
-                del i, record, fs_details
+                del i, record
                 break
     else:
         st = fs_details[0]  # no analysisdate given, working with the first element
