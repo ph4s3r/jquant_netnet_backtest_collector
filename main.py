@@ -63,6 +63,7 @@ log_main.info('-- Running NETNET Backtest --')
 # If you want more data, please check other plans:  https://jpx-jquants.com/
 
 analysis_dates = [
+    '2008-12-21',
     '2009-12-21',
     '2010-12-21',
     '2011-12-21',
