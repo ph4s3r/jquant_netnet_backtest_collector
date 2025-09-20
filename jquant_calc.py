@@ -23,7 +23,10 @@ def to_float(v: Any) -> float:
         return 0.0
 
 
-def jquant_calculate_ncav(fs_details: list[dict], analysisdate: str | None = None) -> dict:
+def jquant_calculate_ncav(
+        fs_details: list[dict], 
+        analysisdate: str | None = None,
+        max_lookbehind: int = 180) -> dict:
     """Calculate NCAV (Net Current Asset Value) from J-Quants fs_details endpoint.
 
     inputs:
@@ -47,6 +50,10 @@ def jquant_calculate_ncav(fs_details: list[dict], analysisdate: str | None = Non
         # sort by disclosure date
         fs_details.sort(key=methodcaller('get', 'DisclosedDate', ''))
 
+        # no lookahead bias!!
+        # the earliest statement is e.g. 2025, nothing before
+        # while the analysis date is 2023, we had no access to
+        # that at that time
         if date.fromisoformat(fs_details[0]['DisclosedDate']) > analysisdate:
             log_calc.info(
                 f'no earlier fs_details found than analysis \
@@ -55,9 +62,13 @@ Disclosed Financial Statements is for {fs_details[0]["DisclosedDate"]}. Skipping
             )
             return {}
 
-        if date.fromisoformat(fs_details[-1]['DisclosedDate']) > analysisdate:
+        # how old statements shall we work with?
+        # the latest statement is e.g. 2020, nothing after
+        # shall we look at that for a ticker analysed in 2023?
+        # how much is too much? maybe half a year?
+        if (analysisdate - date.fromisoformat(fs_details[-1]['DisclosedDate'])).days > max_lookbehind:
             log_calc.info(
-                f'earliest fs_details are older than our analysis \
+                f'latest fs_details are too old for  our analysis \
 date for ticker {fs_details[-1].get("LocalCode")}. Latest \
 Disclosed Financial Statements is for {fs_details[-1]["DisclosedDate"]}. Skipping...'
             )
@@ -118,7 +129,10 @@ Disclosed Financial Statements is for {fs_details[-1]["DisclosedDate"]}. Skippin
     }
 
 
-def jquant_extract_os(statements: list[dict], analysisdate: str | None = None) -> dict:
+def jquant_extract_os(
+        statements: list[dict],
+        analysisdate: str | None = None,
+        max_lookbehind: int = 180) -> dict:
     """Get outstanding shares.
 
     inputs:
@@ -139,6 +153,10 @@ def jquant_extract_os(statements: list[dict], analysisdate: str | None = None) -
         # sort by disclosure date
         statements.sort(key=methodcaller('get', 'DisclosedDate', ''))
 
+        # no lookahead bias!!
+        # the earliest statement is e.g. 2025, nothing before
+        # while the analysis date is 2023, we had no access to
+        # that at that time
         if date.fromisoformat(statements[0]['DisclosedDate']) > analysisdate:
             log_calc.info(
                 f'no earlier statements found than analysis \
@@ -147,9 +165,13 @@ Disclosed Financial Statements is for {statements[0]["DisclosedDate"]}. Skipping
             )
             return {}
 
-        if date.fromisoformat(statements[-1]['DisclosedDate']) > analysisdate:
+        # how old statements shall we work with?
+        # the latest statement is e.g. 2020, nothing after
+        # shall we look at that for a ticker analysed in 2023?
+        # how much is too much? maybe half a year?
+        if (analysisdate - date.fromisoformat(statements[-1]['DisclosedDate'])).days > max_lookbehind:
             log_calc.info(
-                f'earliest statements are older than our analysis \
+                f'latest statements are too old for our analysis \
 date for ticker {statements[-1].get("LocalCode")}. Latest \
 Disclosed Financial Statements is for {statements[-1]["DisclosedDate"]}. Skipping...'
             )
