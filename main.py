@@ -50,7 +50,6 @@ log_main.info('-- Running NETNET Backtest --')
 # If you want more data, please check other plans:  https://jpx-jquants.com/
 
 analysis_dates = [
-    '2008-12-21',
     '2009-12-21',
     '2010-12-21',
     '2011-12-21',
@@ -127,6 +126,9 @@ async def process_ticker(  # noqa: ANN201, PLR0913
         except ZeroDivisionError:
             log_main.debug(f'ZeroDivisionError for {ticker}: no ncav or shares')
             return  # skip to next ticker if ncav or outstanding shares is zero
+        except TypeError:
+            log_main.debug(f'No # of shares data fouind for {ticker}')
+            return
 
         # Also take note of the skew between disclosure dates
         st_disclosure_date = data_calculated[ticker][analysis_date].get('st_disclosure_date')
