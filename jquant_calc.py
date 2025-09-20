@@ -26,7 +26,7 @@ def to_float(v: Any) -> float:
 def jquant_calculate_ncav(
         fs_details: list[dict], 
         analysisdate: str | None = None,
-        max_lookbehind: int = 180) -> dict:
+        max_lookbehind: int = 365) -> dict:
     """Calculate NCAV (Net Current Asset Value) from J-Quants fs_details endpoint.
 
     inputs:
@@ -132,7 +132,7 @@ Disclosed Financial Statements is for {fs_details[-1]["DisclosedDate"]}. Skippin
 def jquant_extract_os(
         statements: list[dict],
         analysisdate: str | None = None,
-        max_lookbehind: int = 180) -> dict:
+        max_lookbehind: int = 365) -> dict:
     """Get outstanding shares.
 
     inputs:
