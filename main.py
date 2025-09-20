@@ -16,9 +16,10 @@ import better_exceptions
 
 # built-in
 import uuid
+import time
+from pathlib import Path
 from asyncio import Lock, Semaphore
 from collections import defaultdict
-import time
 
 # local
 import jquant_calc
@@ -43,6 +44,7 @@ better_exceptions.encoding = 'utf-8'
 # on glacius, log into the var/www folder, otherwise to local logfolder
 LOCAL_LOGDIR = 'jquant_logs/'
 GLACIUS_LOGDIR = r'/var/www/analytics/jquantv2/'
+NETNET_HEADER = "ticker,analysis_date,ncavps,share_price,mos_rate,fs_date,st_date\n"
 
 GLACIUS_UUID = 94558092206834
 ELEMENT_UUID = 91765249380
@@ -168,6 +170,7 @@ async def process_ticker(  # noqa: ANN201, PLR0913
                     data_calculated[ticker][analysis_date]['share_price_at_ncav_date'] = ohlc_data_for_ncav_date[0].get(
                         'Close', 0.0
                     )
+                    break
                 if ohlc_attempt_limit == 0:
                     async with (ohlc_lock,
                         aiofiles.open(f'{ULTIMATE_LOGDIR}/no_ohlc_found_{analysis_date}.txt', 'a', encoding='utf-8') as f,
@@ -184,12 +187,15 @@ async def process_ticker(  # noqa: ANN201, PLR0913
         )
         if data_calculated[ticker][analysis_date]['netnet']:
             log_main.info('netnet stock found!')
-            # write to file: ticker, date, ncavps
-            async with (
-                netnet_lock,
-                aiofiles.open(f'{ULTIMATE_LOGDIR}/tse_netnets_{analysis_date}.txt', 'a', encoding='utf-8') as f,
-            ):
-                await f.write(f'{ticker},{analysis_date},{data_calculated[ticker][analysis_date]["ncavps"]}, {shareprice}, {MoS_rate},{ncavdatadate}, {st_disclosure_date}\n')
+            netnet_fname = f'{ULTIMATE_LOGDIR}/tse_netnets_{analysis_date}.csv'
+            async with netnet_lock:
+                netnet_file_exists = Path(netnet_fname).exists()
+                async with aiofiles.open(netnet_fname, 'a', encoding='utf-8') as f:
+                    if not netnet_file_exists:
+                        await f.write(NETNET_HEADER)
+                    await f.write(
+                        f'{ticker},{analysis_date},{data_calculated[ticker][analysis_date]["ncavps"]:.2f}, {shareprice}, {MoS_rate:.2f},{ncavdatadate}, {st_disclosure_date}\n'
+                    )
             log_main.debug(f'Wrote netnet data for {ticker}')
 
 
