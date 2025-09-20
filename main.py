@@ -138,7 +138,7 @@ async def process_ticker(  # noqa: ANN201, PLR0913
             if not data_calculated[ticker][analysis_date].get('fs_ncav_total', 0.0):
                 raise ZeroDivisionError  # noqa: TRY301
         except ZeroDivisionError:
-            log_main.warning(f'ZeroDivisionError for {ticker}: no ncav or shares')
+            log_main.warning(f'no number of shares date for {ticker}')
             return  # skip to next ticker if ncav or outstanding shares is zero
         except TypeError:
             log_main.warning(f'No # of shares data fouind for {ticker}')
