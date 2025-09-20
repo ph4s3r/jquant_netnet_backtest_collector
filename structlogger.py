@@ -4,6 +4,8 @@ import logging
 import structlog
 from pathlib import Path
 import datetime
+import sys
+import threading
 
 
 def configure_logging(log_dir: str = 'jquant_logs') -> None:
@@ -54,6 +56,29 @@ def configure_logging(log_dir: str = 'jquant_logs') -> None:
         wrapper_class=structlog.stdlib.BoundLogger,
         cache_logger_on_first_use=True,
     )
+
+    # set up global exception hooks for main thread and worker threads
+    root_logger = logging.getLogger()
+
+    def log_unhandled_exception(exc_type, exc_value, exc_traceback):
+        """Log any unhandled exception to both app and error log files."""
+        if issubclass(exc_type, KeyboardInterrupt):
+            # let keyboard interrupts pass through to allow graceful termination
+            sys.__excepthook__(exc_type, exc_value, exc_traceback)
+            return
+        root_logger.critical(
+            'unhandled exception',
+            exc_info=(exc_type, exc_value, exc_traceback),
+        )
+
+    sys.excepthook = log_unhandled_exception
+
+    if hasattr(threading, 'excepthook'):  # python 3.8+
+
+        def thread_exception_hook(args):
+            log_unhandled_exception(args.exc_type, args.exc_value, args.exc_traceback)
+
+        threading.excepthook = thread_exception_hook
 
 
 def get_logger(name: str) -> structlog.stdlib.BoundLogger:
