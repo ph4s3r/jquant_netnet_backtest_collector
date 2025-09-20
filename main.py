@@ -166,7 +166,7 @@ async def process_ticker(  # noqa: ANN201, PLR0913
                     ohlc_attempt_limit -= 1
                     fallback_date = datetime.datetime.fromisoformat(str(fallback_date)).date() - datetime.timedelta(days=1)
                     ohlc_data_for_ncav_date = await jquant.query_ohlc(params={'code': ticker, 'date': str(fallback_date)})
-                    if not ohlc_data_for_ncav_date:
+                    if not ohlc_data_for_ncav_date or not ohlc_data_for_ncav_date[0].get('Close', 0.0):
                         continue
                     data_calculated[ticker][analysis_date]['share_price_at_ncav_date'] = ohlc_data_for_ncav_date[0].get(
                         'Close', 0.0
