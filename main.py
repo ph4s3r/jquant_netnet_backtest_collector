@@ -195,7 +195,7 @@ async def process_ticker(  # noqa: ANN201, PLR0913
                     if not netnet_file_exists:
                         await f.write(NETNET_HEADER)
                     await f.write(
-                        f'{ticker},{analysis_date},{data_calculated[ticker][analysis_date]["ncavps"]:.2f}, {shareprice}, {MoS_rate:.2f},{ncavdatadate}, {st_disclosure_date}\n'
+                        f'{ticker},{analysis_date},{data_calculated[ticker][analysis_date]["ncavps"]:.2f},{shareprice},{MoS_rate:.2f},{ncavdatadate},{st_disclosure_date}\n'
                     )
             log_main.debug(f'Wrote netnet data for {ticker}')
 
