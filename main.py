@@ -31,7 +31,7 @@ SEMAPHORE_LIMIT = 5
 # logger
 # on glacius, log into the var/www folder, otherwise to local logfolder
 LOCAL_LOGDIR = 'jquant_logs/'
-GLACIUS_LOGDIR = r'/var/www/analytics/jquant/'
+GLACIUS_LOGDIR = r'/var/www/analytics/jquantv2/'
 
 GLACIUS_UUID = 94558092206834
 ELEMENT_UUID = 91765249380
@@ -50,15 +50,24 @@ log_main.info('-- Running NETNET Backtest --')
 # If you want more data, please check other plans:  https://jpx-jquants.com/
 
 analysis_dates = [
-    '2007-12-21',
-    '2006-12-21',
-    '2005-12-21',
-    '2004-12-21',
-    '2003-12-21',
-    '2002-12-21',
-    '2001-12-21',
-    '2000-12-21',
-    '1999-12-21',
+    '2008-12-21',
+    '2009-12-21',
+    '2010-12-21',
+    '2011-12-21',
+    '2012-12-21',
+    '2013-12-21',
+    '2014-12-21',
+    '2015-12-21',
+    '2016-12-21',
+    '2017-12-21',
+    '2018-12-21',
+    '2019-12-21',
+    '2020-12-21',
+    '2021-12-21',
+    '2022-12-21',
+    '2023-12-21',
+    '2024-12-21',
+    '2025-09-19',
 ]
 
 
@@ -120,7 +129,7 @@ async def process_ticker(  # noqa: ANN201, PLR0913
             return  # skip to next ticker if ncav or outstanding shares is zero
 
         # Also take note of the skew between disclosure dates
-        # fiscalyearenddate = data_full[ticker][analysis_date].get('st_disclosure_date')
+        st_disclosure_date = data_calculated[ticker][analysis_date].get('st_disclosure_date')
         ncavdatadate = data_calculated[ticker][analysis_date].get('fs_disclosure_date')
         # if fiscalyearenddate and ncavdatadate:
         #     data_full[ticker][analysis_date]['fs_st_skew_days'] = (
@@ -135,14 +144,22 @@ async def process_ticker(  # noqa: ANN201, PLR0913
         if ohlc_data_for_ncav_date := await jquant.query_ohlc(params=ohlc_params):
             data_calculated[ticker][analysis_date]['share_price_at_ncav_date'] = ohlc_data_for_ncav_date[0].get('Close', 0.0)
             if not data_calculated[ticker][analysis_date]['share_price_at_ncav_date']:
-                # TODO: get price from somewhere else because it can be None
-                async with (
-                    ohlc_lock,
-                    aiofiles.open(f'{ULTIMATE_LOGDIR}/no_ohlc_found_{analysis_date}.txt', 'a', encoding='utf-8') as f,
-                ):
-                    await f.write(f'{ticker}\n')
-                log_main.debug(f'No OHLC data for {ticker}')
-                return
+                fallback_date = analysis_date
+                ohlc_attempt_limit = 5 # will try to go max 5 days back
+                while ohlc_attempt_limit > 0:
+                    ohlc_attempt_limit -=1
+                    fallback_date = datetime.datetime.fromisoformat(str(fallback_date)).date() - datetime.timedelta(days=1)
+                    ohlc_data_for_ncav_date = await jquant.query_ohlc(params={'code': ticker, 'date': fallback_date})
+                    data_calculated[ticker][analysis_date]['share_price_at_ncav_date'] = ohlc_data_for_ncav_date[0].get(
+                        'Close', 0.0
+                    )
+                    async with (
+                        ohlc_lock,
+                        aiofiles.open(f'{ULTIMATE_LOGDIR}/no_ohlc_found_{analysis_date}.txt', 'a', encoding='utf-8') as f,
+                    ):
+                        await f.write(f'{ticker}\n')
+                    log_main.debug(f'No OHLC data found for {ticker}, even going 5 days back...')
+                    return
 
         # the asset is netnet if the share price is less than 67% of the ncavps
         data_calculated[ticker][analysis_date]['netnet'] = data_calculated[ticker][analysis_date].get(
@@ -155,7 +172,7 @@ async def process_ticker(  # noqa: ANN201, PLR0913
                 netnet_lock,
                 aiofiles.open(f'{ULTIMATE_LOGDIR}/tse_netnets_{analysis_date}.txt', 'a', encoding='utf-8') as f,
             ):
-                await f.write(f'{ticker},{analysis_date},{data_calculated[ticker][analysis_date]["ncavps"]}\n')
+                await f.write(f'{ticker},{analysis_date},{data_calculated[ticker][analysis_date]["ncavps"], ncavdatadate, st_disclosure_date}\n')
             log_main.debug(f'Wrote netnet data for {ticker}')
 
 

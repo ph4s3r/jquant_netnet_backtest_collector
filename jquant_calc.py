@@ -55,6 +55,14 @@ Disclosed Financial Statements is for {fs_details[0]["DisclosedDate"]}. Skipping
             )
             return {}
 
+        if date.fromisoformat(fs_details[-1]['DisclosedDate']) > analysisdate:
+            log_calc.info(
+                f'earliest fs_details are older than our analysis \
+date for ticker {fs_details[-1].get("LocalCode")}. Latest \
+Disclosed Financial Statements is for {fs_details[-1]["DisclosedDate"]}. Skipping...'
+            )
+            return {}
+
         # find latest statement before analysis date
         for i, record in enumerate(fs_details):
             if (date.fromisoformat(record['DisclosedDate']) - analysisdate).days > 0:
@@ -64,6 +72,8 @@ Disclosed Financial Statements is for {fs_details[0]["DisclosedDate"]}. Skipping
     else:
         st = fs_details[0]  # no analysisdate given, working with the first element
 
+    if not st: # this happens when the above loop does not find older statement so tehre is nowhere to step one item back. the oldest should be fine
+        st = fs_details[-1]
 
     no_liabilities_data = False
 
@@ -124,22 +134,38 @@ def jquant_extract_os(statements: list[dict], analysisdate: str | None = None) -
         return None
     st = None
     if analysisdate:
+        analysisdate = date.fromisoformat(analysisdate)
+
         # sort by disclosure date
         statements.sort(key=methodcaller('get', 'DisclosedDate', ''))
 
-        analysisdate = date.fromisoformat(analysisdate)
+        if date.fromisoformat(statements[0]['DisclosedDate']) > analysisdate:
+            log_calc.info(
+                f'no earlier statements found than analysis \
+date for ticker {statements[0].get("LocalCode")}. Earliest \
+Disclosed Financial Statements is for {statements[0]["DisclosedDate"]}. Skipping...'
+            )
+            return {}
+
+        if date.fromisoformat(statements[-1]['DisclosedDate']) > analysisdate:
+            log_calc.info(
+                f'earliest statements are older than our analysis \
+date for ticker {statements[-1].get("LocalCode")}. Latest \
+Disclosed Financial Statements is for {statements[-1]["DisclosedDate"]}. Skipping...'
+            )
+            return {}
 
         # find latest statement before analysis date
         for i, record in enumerate(statements):
             if (date.fromisoformat(record['DisclosedDate']) - analysisdate).days > 0:
-                st = statements[i - 1]
-                del i, record, statements, analysisdate
+                st = statements[0] if i == 0 else statements[i - 1]
+                del i, record
                 break
-        else:
-            # if no future record found, take the last one
-            st = statements[-1]
     else:
         st = statements[0]  # no analysisdate given, working with the first element
+
+    if not st:  # this happens when the above loop does not find older statement so tehre is nowhere to step one item back. the oldest should be fine
+        st = statements[-1]
 
     shares_outstanding = to_float(
         st.get('NumberOfIssuedAndOutstandingSharesAtTheEndOfFiscalYearIncludingTreasuryStock')
