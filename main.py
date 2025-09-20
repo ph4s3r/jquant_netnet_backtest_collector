@@ -12,6 +12,7 @@ Given a list of selected dates,
 import aiofiles
 import asyncio
 import datetime
+import better_exceptions
 
 # built-in
 import uuid
@@ -27,6 +28,10 @@ from structlogger import configure_logging, get_logger
 
 # Limit concurrent API calls
 SEMAPHORE_LIMIT = 5
+
+# better_exceptions settings
+better_exceptions.MAX_LENGTH = None
+better_exceptions.encoding = 'utf-8'
 
 # logger
 # on glacius, log into the var/www folder, otherwise to local logfolder
@@ -151,12 +156,14 @@ async def process_ticker(  # noqa: ANN201, PLR0913
                 while ohlc_attempt_limit > 0:
                     ohlc_attempt_limit -=1
                     fallback_date = datetime.datetime.fromisoformat(str(fallback_date)).date() - datetime.timedelta(days=1)
-                    ohlc_data_for_ncav_date = await jquant.query_ohlc(params={'code': ticker, 'date': fallback_date})
+                    ohlc_data_for_ncav_date = await jquant.query_ohlc(params={'code': ticker, 'date': str(fallback_date)})
+                    if not ohlc_data_for_ncav_date:
+                        continue
                     data_calculated[ticker][analysis_date]['share_price_at_ncav_date'] = ohlc_data_for_ncav_date[0].get(
                         'Close', 0.0
                     )
-                    async with (
-                        ohlc_lock,
+                if ohlc_attempt_limit == 0:
+                    async with (ohlc_lock,
                         aiofiles.open(f'{ULTIMATE_LOGDIR}/no_ohlc_found_{analysis_date}.txt', 'a', encoding='utf-8') as f,
                     ):
                         await f.write(f'{ticker}\n')
