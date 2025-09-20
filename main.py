@@ -29,6 +29,12 @@ from structlogger import configure_logging, get_logger
 # Limit concurrent API calls
 SEMAPHORE_LIMIT = 5
 
+# NVACPS LIMIT
+NVACPS_LIMIT = 0.8
+
+# OHLC lookback limit
+OHLC_LOOKBACK_LIMIT_DAYS = 14
+
 # better_exceptions settings
 better_exceptions.MAX_LENGTH = None
 better_exceptions.encoding = 'utf-8'
@@ -129,10 +135,10 @@ async def process_ticker(  # noqa: ANN201, PLR0913
             if not data_calculated[ticker][analysis_date].get('fs_ncav_total', 0.0):
                 raise ZeroDivisionError  # noqa: TRY301
         except ZeroDivisionError:
-            log_main.exception(f'ZeroDivisionError for {ticker}: no ncav or shares')
+            log_main.warning(f'ZeroDivisionError for {ticker}: no ncav or shares')
             return  # skip to next ticker if ncav or outstanding shares is zero
         except TypeError:
-            log_main.exception(f'No # of shares data fouind for {ticker}')
+            log_main.warning(f'No # of shares data fouind for {ticker}')
             return
 
         # Also take note of the skew between disclosure dates
@@ -152,9 +158,9 @@ async def process_ticker(  # noqa: ANN201, PLR0913
             data_calculated[ticker][analysis_date]['share_price_at_ncav_date'] = ohlc_data_for_ncav_date[0].get('Close', 0.0)
             if not data_calculated[ticker][analysis_date]['share_price_at_ncav_date']:
                 fallback_date = analysis_date
-                ohlc_attempt_limit = 5 # will try to go max 5 days back
+                ohlc_attempt_limit = OHLC_LOOKBACK_LIMIT_DAYS
                 while ohlc_attempt_limit > 0:
-                    ohlc_attempt_limit -=1
+                    ohlc_attempt_limit -= 1
                     fallback_date = datetime.datetime.fromisoformat(str(fallback_date)).date() - datetime.timedelta(days=1)
                     ohlc_data_for_ncav_date = await jquant.query_ohlc(params={'code': ticker, 'date': str(fallback_date)})
                     if not ohlc_data_for_ncav_date:
@@ -171,9 +177,11 @@ async def process_ticker(  # noqa: ANN201, PLR0913
                     return
 
         # the asset is netnet if the share price is less than 67% of the ncavps
-        data_calculated[ticker][analysis_date]['netnet'] = data_calculated[ticker][analysis_date].get(
-            'share_price_at_ncav_date', 999999
-        ) < (data_calculated[ticker][analysis_date]['ncavps'] * 0.67)
+        shareprice = data_calculated[ticker][analysis_date].get('share_price_at_ncav_date', 999999)
+        MoS_rate = shareprice / data_calculated[ticker][analysis_date]['ncavps']
+        data_calculated[ticker][analysis_date]['netnet'] = shareprice < (
+            data_calculated[ticker][analysis_date]['ncavps'] * NVACPS_LIMIT
+        )
         if data_calculated[ticker][analysis_date]['netnet']:
             log_main.info('netnet stock found!')
             # write to file: ticker, date, ncavps
@@ -181,7 +189,7 @@ async def process_ticker(  # noqa: ANN201, PLR0913
                 netnet_lock,
                 aiofiles.open(f'{ULTIMATE_LOGDIR}/tse_netnets_{analysis_date}.txt', 'a', encoding='utf-8') as f,
             ):
-                await f.write(f'{ticker},{analysis_date},{data_calculated[ticker][analysis_date]["ncavps"], ncavdatadate, st_disclosure_date}\n')
+                await f.write(f'{ticker},{analysis_date},{data_calculated[ticker][analysis_date]["ncavps"]}, {shareprice}, {MoS_rate},{ncavdatadate}, {st_disclosure_date}\n')
             log_main.debug(f'Wrote netnet data for {ticker}')
 
 
