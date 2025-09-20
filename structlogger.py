@@ -24,8 +24,14 @@ def configure_logging(log_dir: str = 'jquant_logs') -> None:
     httpx_handler = logging.FileHandler(httpx_log_file, mode='a', encoding='utf-8')
     httpx_handler.setFormatter(logging.Formatter('%(asctime)s [%(levelname)s] %(name)s %(message)s'))
 
+    # create separate file handler for exception logs
+    exception_log_file = Path(log_dir) / f'errors_{timestamp}.log'
+    exception_handler = logging.FileHandler(exception_log_file, mode='a', encoding='utf-8')
+    exception_handler.setLevel(logging.ERROR)
+    exception_handler.setFormatter(logging.Formatter('%(asctime)s [%(levelname)s] %(name)s %(message)s\n%(exc_info)s'))
+
     # configure root logger to write everything except httpx logs to the main file
-    logging.basicConfig(level=logging.INFO, handlers=[app_handler])
+    logging.basicConfig(level=logging.INFO, handlers=[app_handler, exception_handler])
 
     # attach dedicated handler for httpx logs and disable propagation to avoid duplicates
     httpx_logger = logging.getLogger('httpx')
