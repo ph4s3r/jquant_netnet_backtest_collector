@@ -151,29 +151,26 @@ async def process_ticker(  # noqa: ANN201, PLR0913
             ).days
 
         # get the share price for the day of the ncav data
-        ohlc_params = {'code': ticker, 'date': ncavdatadate}
-        ohlc_data_for_ncav_date = await jquant.query_ohlc(params=ohlc_params)
+        ohlc_data_for_ncav_date = await jquant.query_ohlc(params={'code': ticker, 'date': ncavdatadate})
         if not ohlc_data_for_ncav_date or not ohlc_data_for_ncav_date[0].get('Close', 0.0):
-            data_calculated[ticker][analysis_date]['share_price_at_ncav_date'] = ohlc_data_for_ncav_date[0].get('Close', 0.0)
-            if not data_calculated[ticker][analysis_date]['share_price_at_ncav_date']:
-                fallback_date = ncavdatadate
-                ohlc_attempt_limit = OHLC_LOOKBACK_LIMIT_DAYS
-                while ohlc_attempt_limit > 0:
-                    ohlc_attempt_limit -= 1
-                    fallback_date = datetime.datetime.fromisoformat(str(fallback_date)).date() - datetime.timedelta(days=1)
-                    ohlc_data_for_ncav_date = await jquant.query_ohlc(params={'code': ticker, 'date': str(fallback_date)})
-                    if not ohlc_data_for_ncav_date or not ohlc_data_for_ncav_date[0].get('Close', 0.0):
-                        continue
-                    data_calculated[ticker][analysis_date]['share_price_at_ncav_date'] = ohlc_data_for_ncav_date[0].get(
-                        'Close', 0.0
-                    )
-                    break
-                if ohlc_attempt_limit == 0:
-                    async with ohlc_lock:
-                        async with aiofiles.open(f'{ULTIMATE_LOGDIR}/no_ohlc_found_{analysis_date}.txt', 'a', encoding='utf-8') as f:
-                            await f.write(f'{ticker}\n')
-                    log_main.debug(f'No OHLC data found for {ticker}, even going {OHLC_LOOKBACK_LIMIT_DAYS} days back...')
-                    return
+            fallback_date = ncavdatadate
+            ohlc_attempt_limit = OHLC_LOOKBACK_LIMIT_DAYS
+            while ohlc_attempt_limit > 0:
+                ohlc_attempt_limit -= 1
+                fallback_date = datetime.datetime.fromisoformat(str(fallback_date)).date() - datetime.timedelta(days=1)
+                ohlc_data_for_ncav_date = await jquant.query_ohlc(params={'code': ticker, 'date': str(fallback_date)})
+                if not ohlc_data_for_ncav_date or not ohlc_data_for_ncav_date[0].get('Close', 0.0):
+                    continue
+                data_calculated[ticker][analysis_date]['share_price_at_ncav_date'] = ohlc_data_for_ncav_date[0].get(
+                    'Close', 0.0
+                )
+                break
+            if ohlc_attempt_limit == 0:
+                async with ohlc_lock:
+                    async with aiofiles.open(f'{ULTIMATE_LOGDIR}/no_ohlc_found_{analysis_date}.txt', 'a', encoding='utf-8') as f:
+                        await f.write(f'{ticker}\n')
+                log_main.debug(f'No OHLC data found for {ticker}, even going {OHLC_LOOKBACK_LIMIT_DAYS} days back...')
+                return
 
         # the asset is netnet if the share price is less than NVACPS_LIMIT * 100 % of the ncavps
         shareprice = data_calculated[ticker][analysis_date].get('share_price_at_ncav_date', 999999)
