@@ -55,7 +55,7 @@ def jquant_calculate_ncav(
         # while the analysis date is 2023, we had no access to
         # that at that time
         if date.fromisoformat(fs_details[0]['DisclosedDate']) > analysisdate:
-            log_calc.info(
+            log_calc.warning(
                 f'no earlier fs_details found than analysis \
 date for ticker {fs_details[0].get("LocalCode")}. Earliest \
 Disclosed Financial Statements is for {fs_details[0]["DisclosedDate"]}. Skipping...'
@@ -67,7 +67,7 @@ Disclosed Financial Statements is for {fs_details[0]["DisclosedDate"]}. Skipping
         # shall we look at that for a ticker analysed in 2023?
         # how much is too much? maybe half a year?
         if (analysisdate - date.fromisoformat(fs_details[-1]['DisclosedDate'])).days > max_lookbehind:
-            log_calc.info(
+            log_calc.warning(
                 f'latest fs_details are too old for  our analysis \
 date for ticker {fs_details[-1].get("LocalCode")}. Latest \
 Disclosed Financial Statements is for {fs_details[-1]["DisclosedDate"]}. Skipping...'
@@ -158,7 +158,7 @@ def jquant_extract_os(
         # while the analysis date is 2023, we had no access to
         # that at that time
         if date.fromisoformat(statements[0]['DisclosedDate']) > analysisdate:
-            log_calc.info(
+            log_calc.warning(
                 f'no earlier statements found than analysis \
 date for ticker {statements[0].get("LocalCode")}. Earliest \
 Disclosed Financial Statements is for {statements[0]["DisclosedDate"]}. Skipping...'
@@ -170,7 +170,7 @@ Disclosed Financial Statements is for {statements[0]["DisclosedDate"]}. Skipping
         # shall we look at that for a ticker analysed in 2023?
         # how much is too much? maybe half a year?
         if (analysisdate - date.fromisoformat(statements[-1]['DisclosedDate'])).days > max_lookbehind:
-            log_calc.info(
+            log_calc.warning(
                 f'latest statements are too old for our analysis \
 date for ticker {statements[-1].get("LocalCode")}. Latest \
 Disclosed Financial Statements is for {statements[-1]["DisclosedDate"]}. Skipping...'

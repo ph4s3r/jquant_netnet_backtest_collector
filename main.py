@@ -169,7 +169,7 @@ async def process_ticker(  # noqa: ANN201, PLR0913
                 async with ohlc_lock:
                     async with aiofiles.open(f'{ULTIMATE_LOGDIR}/no_ohlc_found_{analysis_date}.txt', 'a', encoding='utf-8') as f:
                         await f.write(f'{ticker}\n')
-                log_main.debug(f'No OHLC data found for {ticker}, even going {OHLC_LOOKBACK_LIMIT_DAYS} days back...')
+                log_main.warning(f'No OHLC data found for {ticker}, even going {OHLC_LOOKBACK_LIMIT_DAYS} days back...')
                 return
 
         # the asset is netnet if the share price is less than NVACPS_LIMIT * 100 % of the ncavps
