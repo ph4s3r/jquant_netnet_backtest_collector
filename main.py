@@ -100,6 +100,7 @@ async def process_ticker(  # noqa: ANN201, PLR0913
         log_main.debug(f'Processing ticker: {ticker} for {analysis_date}')
         # NCAV data from https://jpx.gitbook.io/j-quants-en/api-reference/statements-1
         st_params = {'code': ticker}
+        fs_details_params = {'code': ticker}
 
         if not fs_details[ticker]:
             fs_details[ticker] = await jquant.query_endpoint(endpoint='fs_details', params=st_params)
@@ -117,7 +118,7 @@ async def process_ticker(  # noqa: ANN201, PLR0913
 
         # for NCAVPS: getting outstanding shares from https://jpx.gitbook.io/j-quants-en/api-reference/statements
         if not statements[ticker]['statements']:
-            statements[ticker]['statements'] = await jquant.query_endpoint(endpoint='statements', params=st_params)
+            statements[ticker]['statements'] = await jquant.query_endpoint(endpoint='statements', params=fs_details_params)
         if statements[ticker]['statements']:
             outstanding_shares_data = jquant_calc.jquant_extract_os(
                 statements=statements[ticker]['statements'],
