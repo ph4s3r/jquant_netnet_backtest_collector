@@ -171,7 +171,6 @@ class JQuantAPIClient:
                 id_token = self.get_idtoken(refresh=True)
                 headers = {'Authorization': f'Bearer {id_token}'}
                 token_error_flag = True
-                i -= 1
             else:
                 log_cli.info(res.json())
                 sys.exit(1)

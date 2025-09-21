@@ -182,7 +182,7 @@ async def process_ticker(  # noqa: ANN201, PLR0913
                     log_main.debug(f'No OHLC data found for {ticker}, even going 5 days back...')
                     return
 
-        # the asset is netnet if the share price is less than 67% of the ncavps
+        # the asset is netnet if the share price is less than NVACPS_LIMIT * 100 % of the ncavps
         shareprice = data_calculated[ticker][analysis_date].get('share_price_at_ncav_date', 999999)
         MoS_rate = shareprice / data_calculated[ticker][analysis_date]['ncavps']
         data_calculated[ticker][analysis_date]['netnet'] = shareprice < (
