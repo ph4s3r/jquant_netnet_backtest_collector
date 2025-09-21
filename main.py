@@ -44,7 +44,7 @@ better_exceptions.encoding = 'utf-8'
 # on glacius, log into the var/www folder, otherwise to local logfolder
 LOCAL_LOGDIR = 'jquant_logs/'
 GLACIUS_LOGDIR = r'/var/www/analytics/jquantv2/'
-NETNET_HEADER = "ticker,analysis_date,ncavps,share_price,mos_rate,fs_date,st_date\n"
+NETNET_HEADER = 'ticker,analysis_date,ncavps,share_price,mos_rate,fs_date,st_date\n'
 
 GLACIUS_UUID = 94558092206834
 ELEMENT_UUID = 91765249380
@@ -157,10 +157,11 @@ async def process_ticker(  # noqa: ANN201, PLR0913
 
         # get the share price for the day of the ncav data
         ohlc_params = {'code': ticker, 'date': ncavdatadate}
-        if ohlc_data_for_ncav_date := await jquant.query_ohlc(params=ohlc_params):
+        ohlc_data_for_ncav_date = await jquant.query_ohlc(params=ohlc_params)
+        if not ohlc_data_for_ncav_date or not ohlc_data_for_ncav_date[0].get('Close', 0.0):
             data_calculated[ticker][analysis_date]['share_price_at_ncav_date'] = ohlc_data_for_ncav_date[0].get('Close', 0.0)
             if not data_calculated[ticker][analysis_date]['share_price_at_ncav_date']:
-                fallback_date = analysis_date
+                fallback_date = ncavdatadate
                 ohlc_attempt_limit = OHLC_LOOKBACK_LIMIT_DAYS
                 while ohlc_attempt_limit > 0:
                     ohlc_attempt_limit -= 1
