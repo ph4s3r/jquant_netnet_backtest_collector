@@ -31,7 +31,7 @@ from structlogger import configure_logging, get_logger
 SEMAPHORE_LIMIT = 5
 
 # NVACPS LIMIT
-NVACPS_LIMIT = 0.8
+NCAVPS_LIMIT = 0.8
 
 # OHLC lookback limit
 OHLC_LOOKBACK_LIMIT_DAYS = 14
@@ -59,9 +59,6 @@ configure_logging(log_dir=ULTIMATE_LOGDIR)
 log_main = get_logger('main')
 log_main.info('-- Running NETNET Backtest --')
 
-# The free subscription covers the following dates: 2023-06-21 ~ 2025-06-21.
-# If you want more data, please check other plans:  https://jpx-jquants.com/
-
 analysis_dates = [
     '2009-02-21',
     '2009-12-21',
@@ -88,8 +85,8 @@ async def process_ticker(  # noqa: ANN201, PLR0913
     ticker: str,
     analysis_date: str,
     data_calculated: defaultdict,
-    fs_details: defaultdict,
-    statements: defaultdict,
+    fs_details: list,
+    statements: list,
     ohlc_lock: Lock,
     netnet_lock: Lock,
     semaphore: Semaphore,
@@ -98,12 +95,11 @@ async def process_ticker(  # noqa: ANN201, PLR0913
     """Process a single ticker for an analysis date."""
     async with semaphore:
         log_main.debug(f'Processing ticker: {ticker} for {analysis_date}')
-        # NCAV data from https://jpx.gitbook.io/j-quants-en/api-reference/statements-1
-        st_params = {'code': ticker}
-        fs_details_params = {'code': ticker}
 
+        # NCAV data from https://jpx.gitbook.io/j-quants-en/api-reference/statements-1
+        fs_details_params = {'code': ticker}
         if not fs_details[ticker]:
-            fs_details[ticker] = await jquant.query_endpoint(endpoint='fs_details', params=st_params)
+            fs_details[ticker] = await jquant.query_endpoint(endpoint='fs_details', params=fs_details_params)
         if fs_details[ticker]:
             ncav_data = jquant_calc.jquant_calculate_ncav(
                 fs_details=fs_details[ticker],
@@ -117,8 +113,9 @@ async def process_ticker(  # noqa: ANN201, PLR0913
             return  # no fs_details, skip to next ticker
 
         # for NCAVPS: getting outstanding shares from https://jpx.gitbook.io/j-quants-en/api-reference/statements
+        st_params = {'code': ticker}
         if not statements[ticker]['statements']:
-            statements[ticker]['statements'] = await jquant.query_endpoint(endpoint='statements', params=fs_details_params)
+            statements[ticker]['statements'] = await jquant.query_endpoint(endpoint='statements', params=st_params)
         if statements[ticker]['statements']:
             outstanding_shares_data = jquant_calc.jquant_extract_os(
                 statements=statements[ticker]['statements'],
@@ -175,18 +172,17 @@ async def process_ticker(  # noqa: ANN201, PLR0913
                     )
                     break
                 if ohlc_attempt_limit == 0:
-                    async with (ohlc_lock,
-                        aiofiles.open(f'{ULTIMATE_LOGDIR}/no_ohlc_found_{analysis_date}.txt', 'a', encoding='utf-8') as f,
-                    ):
-                        await f.write(f'{ticker}\n')
-                    log_main.debug(f'No OHLC data found for {ticker}, even going 5 days back...')
+                    async with ohlc_lock:
+                        async with aiofiles.open(f'{ULTIMATE_LOGDIR}/no_ohlc_found_{analysis_date}.txt', 'a', encoding='utf-8') as f:
+                            await f.write(f'{ticker}\n')
+                    log_main.debug(f'No OHLC data found for {ticker}, even going {OHLC_LOOKBACK_LIMIT_DAYS} days back...')
                     return
 
         # the asset is netnet if the share price is less than NVACPS_LIMIT * 100 % of the ncavps
         shareprice = data_calculated[ticker][analysis_date].get('share_price_at_ncav_date', 999999)
         MoS_rate = shareprice / data_calculated[ticker][analysis_date]['ncavps']
         data_calculated[ticker][analysis_date]['netnet'] = shareprice < (
-            data_calculated[ticker][analysis_date]['ncavps'] * NVACPS_LIMIT
+            data_calculated[ticker][analysis_date]['ncavps'] * NCAVPS_LIMIT
         )
         if data_calculated[ticker][analysis_date]['netnet']:
             log_main.info('netnet stock found!')
