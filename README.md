@@ -1,10 +1,11 @@
 
-![alt text](image.png)
-
 # 🏹 JQUANT NETNET BACKTESTER
 
 **Quantitative backtesting tool for deep value "net-net" investing strategies**  
 Backtest data collector on Japanese equities (TSE), NCAV (Net Current Asset Value) analysis, and price-to-NCAV screening.
+
+A Paper on Testing Benjamin Graham’s net current asset value model:
+https://journalofeconomics.org/index.php/site/article/view/151/260
 
 **Calculation Basis**:
 The NCAV (Net Current Asset Value) strategy implemented here follows Benjamin Graham’s “Net-Net” approach — selecting stocks trading below their current assets minus total liabilities.
@@ -76,3 +77,5 @@ Performance results are logged into structured CSV files, typically named like:
 
 ```bash
 uv run main.py
+
+![alt text](image.png)
