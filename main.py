@@ -43,8 +43,8 @@ better_exceptions.encoding = 'utf-8'
 # logger
 # on glacius, log into the var/www folder, otherwise to local logfolder
 LOCAL_LOGDIR = 'jquant_logs/'
-GLACIUS_LOGDIR = r'/var/www/analytics/jquantv2/'
-NETNET_HEADER = 'ticker,analysis_date,ncavps,share_price,mos_rate,fs_date,st_date\n'
+GLACIUS_LOGDIR = r'/var/www/analytics/jquantv3/'
+NETNET_HEADER = 'ticker,analysis_date,ncavps,share_price,mos_rate,fs_date,st_date,fs_st_skew_days\n'
 
 GLACIUS_UUID = 94558092206834
 ELEMENT_UUID = 91765249380
@@ -61,23 +61,22 @@ log_main.info('-- Running NETNET Backtest --')
 
 analysis_dates = [
     '2009-02-21',
-    '2009-12-21',
-    '2010-12-21',
-    '2011-12-21',
-    '2012-12-21',
-    '2013-12-21',
-    '2014-12-21',
-    '2015-12-21',
-    '2016-12-21',
-    '2017-12-21',
-    '2018-12-21',
-    '2019-12-21',
-    '2020-12-21',
-    '2021-12-21',
-    '2022-12-21',
-    '2023-12-21',
-    '2024-12-21',
-    '2025-09-19',
+    '2010-01-01',
+    '2011-01-01',
+    '2012-01-01',
+    '2013-01-01',
+    '2014-01-01',
+    '2015-01-01',
+    '2016-01-01',
+    '2017-01-01',
+    '2018-01-01',
+    '2019-01-01',
+    '2020-01-01',
+    '2021-01-01',
+    '2022-01-01',
+    '2023-01-01',
+    '2024-01-01',
+    '2025-09-20',
 ]
 
 
@@ -136,22 +135,20 @@ async def process_ticker(  # noqa: ANN201, PLR0913
             if not data_calculated[ticker][analysis_date].get('fs_ncav_total', 0.0):
                 raise ZeroDivisionError  # noqa: TRY301
         except ZeroDivisionError:
-            log_main.warning(f'no number of shares date for {ticker}')
+            log_main.warning(f'no number of shares data for {ticker}')
             return  # skip to next ticker if ncav or outstanding shares is zero
         except TypeError:
-            log_main.warning(f'No # of shares data fouind for {ticker}')
+            log_main.warning(f'No # of shares data found for {ticker}')
             return
 
         # Also take note of the skew between disclosure dates
         st_disclosure_date = data_calculated[ticker][analysis_date].get('st_disclosure_date')
         ncavdatadate = data_calculated[ticker][analysis_date].get('fs_disclosure_date')
-        # if fiscalyearenddate and ncavdatadate:
-        #     data_full[ticker][analysis_date]['fs_st_skew_days'] = (
-        #         datetime.datetime.fromisoformat(fiscalyearenddate).date() - \
-        #         datetime.datetime.fromisoformat(ncavdatadate).date()
-        #     ).days
-        # else:
-        #     data_full[ticker][analysis_date]['fs_st_skew_days'] = -999999
+        if st_disclosure_date and ncavdatadate:
+            data_calculated[ticker][analysis_date]['fs_st_skew_days'] = (
+                datetime.datetime.fromisoformat(st_disclosure_date).date() - \
+                datetime.datetime.fromisoformat(ncavdatadate).date()
+            ).days
 
         # get the share price for the day of the ncav data
         ohlc_params = {'code': ticker, 'date': ncavdatadate}
@@ -193,7 +190,7 @@ async def process_ticker(  # noqa: ANN201, PLR0913
                     if not netnet_file_exists:
                         await f.write(NETNET_HEADER)
                     await f.write(
-                        f'{ticker},{analysis_date},{data_calculated[ticker][analysis_date]["ncavps"]:.2f},{shareprice},{MoS_rate:.2f},{ncavdatadate},{st_disclosure_date}\n'
+                        f'{ticker},{analysis_date},{data_calculated[ticker][analysis_date]["ncavps"]:.2f},{shareprice},{MoS_rate:.2f},{ncavdatadate},{st_disclosure_date},{data_calculated[ticker][analysis_date]['fs_st_skew_days']}\n'
                     )
             log_main.debug(f'Wrote netnet data for {ticker}')
 
