@@ -123,7 +123,11 @@ async def process_ticker(  # noqa: ANN201, PLR0913
                 analysisdate=analysis_date,
                 max_lookbehind=ST_LOOKBACK_LIMIT_DAYS,
             )
-            data_calculated[ticker][analysis_date].update(outstanding_shares_data)
+            if outstanding_shares_data:
+                data_calculated[ticker][analysis_date].update(outstanding_shares_data)
+            else:
+                log_main.debug(f'No quarterly statements for {ticker}')
+                return
         else:
             log_main.debug(f'No statements for {ticker}')
             return
