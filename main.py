@@ -1,11 +1,10 @@
-"""NETNET Backtest.
+"""JQUANT NETNET BACKTEST DATA COLLECTOR.
 
 Given a list of selected dates,
 - Fetch a list of all asset tickers traded on TSE
 - Fetch detailed balance sheets for each ticker & date
-- Fetch dividends data
-- Calculate NCAV & TTM dividends
-- Return a list of assets fulfilling a criteria (wip)
+- Calculate NCAVPS for each
+- Return a list of tickers filtered by NCAVPS_LIMIT
 """
 
 # pypi
@@ -33,8 +32,10 @@ SEMAPHORE_LIMIT = 5
 # NVACPS LIMIT
 NCAVPS_LIMIT = 0.8
 
-# OHLC lookback limit
-OHLC_LOOKBACK_LIMIT_DAYS = 14
+# limits to how much earlier data we are willing to use if there is no recent given
+OHLC_LOOKBACK_LIMIT_DAYS = 14  # latest share price vs ncav calculation date (fs_details disclosure)
+FS_LOOKBACK_LIMIT_DAYS = 365  # fs_details vs analysis date
+ST_LOOKBACK_LIMIT_DAYS = 365  # statements vs analysis date
 
 # better_exceptions settings
 better_exceptions.MAX_LENGTH = None
@@ -103,6 +104,7 @@ async def process_ticker(  # noqa: ANN201, PLR0913
             ncav_data = jquant_calc.jquant_calculate_ncav(
                 fs_details=fs_details[ticker],
                 analysisdate=analysis_date,
+                max_lookbehind=FS_LOOKBACK_LIMIT_DAYS,
             )
             if not ncav_data:
                 return
@@ -119,6 +121,7 @@ async def process_ticker(  # noqa: ANN201, PLR0913
             outstanding_shares_data = jquant_calc.jquant_extract_os(
                 statements=statements[ticker]['statements'],
                 analysisdate=analysis_date,
+                max_lookbehind=ST_LOOKBACK_LIMIT_DAYS,
             )
             data_calculated[ticker][analysis_date].update(outstanding_shares_data)
         else:
@@ -127,16 +130,14 @@ async def process_ticker(  # noqa: ANN201, PLR0913
 
         # Calculate NCAVPS
         try:
-            data_calculated[ticker][analysis_date]['ncavps'] = data_calculated[ticker][analysis_date].get(
-                'fs_ncav_total', 0.0
-            ) / data_calculated[ticker][analysis_date].get(
+            data_calculated[ticker][analysis_date]['ncavps'] = data_calculated[ticker][analysis_date].get('fs_ncav_total', 0.0) / data_calculated[ticker][analysis_date].get(
                 'st_NumberOfIssuedAndOutstandingSharesAtTheEndOfFiscalYearIncludingTreasuryStock'
             )
             if not data_calculated[ticker][analysis_date].get('fs_ncav_total', 0.0):
                 raise ZeroDivisionError  # noqa: TRY301
         except ZeroDivisionError:
             log_main.warning(f'no number of shares data for {ticker}')
-            return  # skip to next ticker if outstanding shares is zero
+            return  # skip to next ticker if ncav or outstanding shares is zero
         except TypeError:
             log_main.warning(f'No # of shares data found for {ticker}')
             return
@@ -146,8 +147,7 @@ async def process_ticker(  # noqa: ANN201, PLR0913
         ncavdatadate = data_calculated[ticker][analysis_date].get('fs_disclosure_date')
         if st_disclosure_date and ncavdatadate:
             data_calculated[ticker][analysis_date]['fs_st_skew_days'] = (
-                datetime.datetime.fromisoformat(st_disclosure_date).date() - \
-                datetime.datetime.fromisoformat(ncavdatadate).date()
+                datetime.datetime.fromisoformat(st_disclosure_date).date() - datetime.datetime.fromisoformat(ncavdatadate).date()
             ).days
 
         # get the share price for the day of the ncav data
@@ -161,9 +161,7 @@ async def process_ticker(  # noqa: ANN201, PLR0913
                 ohlc_data_for_ncav_date = await jquant.query_ohlc(params={'code': ticker, 'date': str(fallback_date)})
                 if not ohlc_data_for_ncav_date or not ohlc_data_for_ncav_date[0].get('Close', 0.0):
                     continue
-                data_calculated[ticker][analysis_date]['share_price_at_ncav_date'] = ohlc_data_for_ncav_date[0].get(
-                    'Close', 0.0
-                )
+                data_calculated[ticker][analysis_date]['share_price_at_ncav_date'] = ohlc_data_for_ncav_date[0].get('Close', 0.0)
                 break
             if ohlc_attempt_limit == 0:
                 async with ohlc_lock:
@@ -175,9 +173,7 @@ async def process_ticker(  # noqa: ANN201, PLR0913
         # the asset is netnet if the share price is less than NVACPS_LIMIT * 100 % of the ncavps
         shareprice = data_calculated[ticker][analysis_date].get('share_price_at_ncav_date', 999999)
         MoS_rate = shareprice / data_calculated[ticker][analysis_date]['ncavps']
-        data_calculated[ticker][analysis_date]['netnet'] = shareprice < (
-            data_calculated[ticker][analysis_date]['ncavps'] * NCAVPS_LIMIT
-        )
+        data_calculated[ticker][analysis_date]['netnet'] = shareprice < (data_calculated[ticker][analysis_date]['ncavps'] * NCAVPS_LIMIT)
         if data_calculated[ticker][analysis_date]['netnet']:
             log_main.info('netnet stock found!')
             netnet_fname = f'{ULTIMATE_LOGDIR}/tse_netnets_{analysis_date}.csv'
@@ -187,7 +183,7 @@ async def process_ticker(  # noqa: ANN201, PLR0913
                     if not netnet_file_exists:
                         await f.write(NETNET_HEADER)
                     await f.write(
-                        f'{ticker},{analysis_date},{data_calculated[ticker][analysis_date]["ncavps"]:.2f},{shareprice},{MoS_rate:.2f},{ncavdatadate},{st_disclosure_date},{data_calculated[ticker][analysis_date]['fs_st_skew_days']}\n'
+                        f'{ticker},{analysis_date},{data_calculated[ticker][analysis_date]["ncavps"]:.2f},{shareprice},{MoS_rate:.2f},{ncavdatadate},{st_disclosure_date},{data_calculated[ticker][analysis_date]["fs_st_skew_days"]}\n'
                     )
             log_main.debug(f'Wrote netnet data for {ticker}')
 
@@ -215,20 +211,14 @@ async def main() -> None:
         tickers_processed_counter = {'count': 0, 'start': start_time}
         stop_event = asyncio.Event()
 
-        async def counted_process_ticker(
-            ticker: str, *, analysis_date=analysis_date, tickers_processed_counter=tickers_processed_counter
-        ) -> None:
-            await process_ticker(
-                ticker, analysis_date, data_calculated, fs_details,
-                statements, ohlc_lock, netnet_lock, semaphore, jquant
-            )
+        async def counted_process_ticker(ticker: str, *, analysis_date=analysis_date, tickers_processed_counter=tickers_processed_counter) -> None:
+            await process_ticker(ticker, analysis_date, data_calculated, fs_details, statements, ohlc_lock, netnet_lock, semaphore, jquant)
             tickers_processed_counter['count'] += 1
 
         tasks = [counted_process_ticker(t) for t in tickers[analysis_date]]
-        periodic_logger_task = asyncio.create_task(
-            periodic_perf_logger(
-                60, perf_log_file, analysis_date, SEMAPHORE_LIMIT, tickers_processed_counter, stop_event
-                )
+        periodic_logger_task = asyncio.create_task(periodic_perf_logger(
+            60, perf_log_file, analysis_date, SEMAPHORE_LIMIT, tickers_processed_counter, stop_event
+            )
         )
 
         await asyncio.gather(*tasks)
