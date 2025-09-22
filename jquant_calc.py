@@ -1,17 +1,18 @@
-"""Functions to calculate the below from JQuant metrics.
+"""Functions to extract specific information from raw Jquant data.
 
 - NCAV
-- TTM (Trailing Twelve Months) dividends
+- extract outstanding shares data from statements
+- TTM (Trailing Twelve Months) dividends (currently not used in the main process)
 """
-
 
 # built-in
 from typing import Any
 from operator import methodcaller
 from datetime import date, timedelta
 
-#local
+# local
 from structlogger import get_logger
+
 log_calc = get_logger('calc')
 
 # the financial statements we work with
@@ -22,9 +23,11 @@ FINANCIAL_STATEMENT_TYPES = {
     'FYFinancialStatements_Consolidated_JP',
 }
 
+
 def filter_financial_statements(statements: list[dict]) -> list[dict]:
     """Filter out non-financial-statement documents."""
     return [s for s in statements if s.get('TypeOfDocument') in FINANCIAL_STATEMENT_TYPES]
+
 
 def to_float(v: Any) -> float:
     """Convert arbitrary values to float, return 0 if cannot."""
@@ -42,10 +45,10 @@ def jquant_calculate_ncav(
 
     inputs:
         - fs_details: output of /statements-1 endpoint
-        - analysisdate: the date we would like to run the backtest for: e.g. '2025-09-04'
+        - analysisdate: the date we run the data collection for: e.g. '2025-09-04'
 
     Logic:
-        1. Find the closest financial statement disclosed before or on `analysisdate`
+        1. Find the closest quarterly financial statement disclosed before or on `analysisdate`
         2. Use:
             - Current assets (IFRS)
             - Liabilities (IFRS)   (or sum of current + non-current liabilities if available)
@@ -55,7 +58,6 @@ def jquant_calculate_ncav(
         return None
     st = None
     if analysisdate:
-
         analysisdate = date.fromisoformat(analysisdate)
 
         # sort by disclosure date
@@ -94,7 +96,7 @@ Disclosed Financial Statements is for {fs_details[-1]["DisclosedDate"]}. Skippin
     else:
         st = fs_details[0]  # no analysisdate given, working with the first element
 
-    if not st: # this happens when the above loop does not find older statement so tehre is nowhere to step one item back. the oldest should be fine
+    if not st:  # this happens when the above loop does not find older statement so nowhere to step one item back. the oldest should be fine
         st = fs_details[-1]
 
     no_liabilities_data = False
@@ -110,16 +112,11 @@ Disclosed Financial Statements is for {fs_details[-1]["DisclosedDate"]}. Skippin
     if not current_assets:
         return {}
 
-    # Fallback: if total liabilities missing, sum CL + NCL if available
+    # fallback: if total liabilities missing, sum CL + NCL if available
     if not total_liabilities:
-        current_liabilities = to_float(
-            st['FinancialStatement'].get('Current liabilities (IFRS)')
-            or st['FinancialStatement'].get('Current liabilities')
-        )
-        noncurrent_liabilities = to_float(
-            st['FinancialStatement'].get('Non-current liabilities (IFRS)')
-            or st['FinancialStatement'].get('Non-current liabilities')
-        )
+        current_liabilities = to_float(st['FinancialStatement'].get('Current liabilities (IFRS)') or st['FinancialStatement'].get('Current liabilities'))
+
+        noncurrent_liabilities = to_float(st['FinancialStatement'].get('Non-current liabilities (IFRS)') or st['FinancialStatement'].get('Non-current liabilities'))
         if not current_liabilities or not noncurrent_liabilities:
             no_liabilities_data = True
         else:
@@ -159,7 +156,8 @@ def jquant_extract_os(
         return None
     st = None
 
-    statements = filter_financial_statements(statements)
+    if statements := filter_financial_statements(statements) is None:
+        return None
 
     if analysisdate:
         analysisdate = date.fromisoformat(analysisdate)
@@ -222,7 +220,7 @@ def jquant_extract_dividends(dividend_data: dict, analysisdate: str | None = Non
     """Calculate TTM (Trailing Twelve Months) dividends from J-Quants dividend endpoint.
 
     inputs:
-        - dividend_data: output of /dividends endpoint (dict with "dividend" key containing list of dicts)
+        - dividend_data: output of /dividends endpoint (dict with 'dividend' key containing list of dicts)
         - analysisdate: the date we would like to run the backtest for: e.g. '2025-09-04'
 
     Logic:
@@ -232,7 +230,6 @@ def jquant_extract_dividends(dividend_data: dict, analysisdate: str | None = Non
     if not dividend_data:
         return {'ttm_dividend': 0.0}
 
-    # Convert analysisdate
     adate = date.fromisoformat(analysisdate)
     one_year_ago = adate - timedelta(days=365)
 
@@ -248,7 +245,7 @@ def jquant_extract_dividends(dividend_data: dict, analysisdate: str | None = Non
         except ValueError:
             continue
 
-        # Filter: record_date must be within last 12 months before analysisdate
+        # filter: record_date must be within last 12 months before analysisdate
         if one_year_ago <= record_date <= adate:
             amount = to_float(d.get('DistributionAmount'))
             ttm_dividend += amount
