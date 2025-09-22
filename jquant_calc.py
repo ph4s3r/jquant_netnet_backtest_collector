@@ -156,7 +156,8 @@ def jquant_extract_os(
         return None
     st = None
 
-    if statements := filter_financial_statements(statements) is None:
+    statements = filter_financial_statements(statements)
+    if not statements:
         return None
 
     if analysisdate:
