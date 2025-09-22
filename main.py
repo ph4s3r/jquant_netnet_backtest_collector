@@ -136,7 +136,7 @@ async def process_ticker(  # noqa: ANN201, PLR0913
                 raise ZeroDivisionError  # noqa: TRY301
         except ZeroDivisionError:
             log_main.warning(f'no number of shares data for {ticker}')
-            return  # skip to next ticker if ncav or outstanding shares is zero
+            return  # skip to next ticker if outstanding shares is zero
         except TypeError:
             log_main.warning(f'No # of shares data found for {ticker}')
             return
