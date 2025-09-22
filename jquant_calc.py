@@ -14,6 +14,17 @@ from datetime import date, timedelta
 from structlogger import get_logger
 log_calc = get_logger('calc')
 
+# the financial statements we work with
+FINANCIAL_STATEMENT_TYPES = {
+    '1QFinancialStatements_Consolidated_JP',
+    '2QFinancialStatements_Consolidated_JP',
+    '3QFinancialStatements_Consolidated_JP',
+    'FYFinancialStatements_Consolidated_JP',
+}
+
+def filter_financial_statements(statements: list[dict]) -> list[dict]:
+    """Filter out non-financial-statement documents."""
+    return [s for s in statements if s.get('TypeOfDocument') in FINANCIAL_STATEMENT_TYPES]
 
 def to_float(v: Any) -> float:
     """Convert arbitrary values to float, return 0 if cannot."""
@@ -24,7 +35,7 @@ def to_float(v: Any) -> float:
 
 
 def jquant_calculate_ncav(
-        fs_details: list[dict], 
+        fs_details: list[dict],
         analysisdate: str | None = None,
         max_lookbehind: int = 365) -> dict:
     """Calculate NCAV (Net Current Asset Value) from J-Quants fs_details endpoint.
@@ -147,6 +158,9 @@ def jquant_extract_os(
     if not statements:
         return None
     st = None
+
+    statements = filter_financial_statements(statements)
+
     if analysisdate:
         analysisdate = date.fromisoformat(analysisdate)
 
