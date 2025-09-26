@@ -32,10 +32,7 @@ def to_float(v: Any) -> float:
         return 0.0
 
 
-def jquant_calculate_ncav(
-        fs_details: list[dict],
-        analysisdate: str | None = None,
-        max_lookbehind: int = 365) -> dict:
+def jquant_calculate_ncav(fs_details: list[dict], analysisdate: str | None = None, max_lookbehind: int = 365) -> dict:
     """Calculate NCAV (Net Current Asset Value) from J-Quants fs_details endpoint.
 
     inputs:
@@ -97,12 +94,8 @@ Disclosed Financial Statements is for {fs_details[-1]["DisclosedDate"]}. Skippin
     no_liabilities_data = False
 
     # Extract required fields
-    current_assets = to_float(
-        st['FinancialStatement'].get('Current assets (IFRS)') or st['FinancialStatement'].get('Current assets')
-    )
-    total_liabilities = to_float(
-        st['FinancialStatement'].get('Liabilities (IFRS)') or st['FinancialStatement'].get('Liabilities')
-    )
+    current_assets = to_float(st['FinancialStatement'].get('Current assets (IFRS)') or st['FinancialStatement'].get('Current assets'))
+    total_liabilities = to_float(st['FinancialStatement'].get('Liabilities (IFRS)') or st['FinancialStatement'].get('Liabilities'))
 
     if not current_assets:
         return {}
@@ -122,20 +115,45 @@ Disclosed Financial Statements is for {fs_details[-1]["DisclosedDate"]}. Skippin
     # NCAV
     ncav_total = current_assets - total_liabilities
 
+    fs_profit_to_owners = to_float(
+        st['FinancialStatement'].get('Profit (loss) attributable to owners of parent (IFRS)') or st['FinancialStatement'].get('Profit (loss) attributable to owners of parent')
+        )
+
+    fs_net_debt = (
+            to_float(st['FinancialStatement'].get('Bonds and borrowings - CL (IFRS)'))
+            + to_float(st['FinancialStatement'].get('Bonds and borrowings - NCL (IFRS)'))
+            - to_float(st['FinancialStatement'].get('Cash and cash equivalents (IFRS)'))
+        )
+
+    # TODO: remove this after knowing the possible key names
+    if any('Bonds and borrowings' in key for key in st['FinancialStatement']):
+        pass
+
+    if st['FinancialStatement'].get('Bonds and borrowings - CL (IFRS)') or st['FinancialStatement'].get('Bonds and borrowings - NCL (IFRS)') or st['FinancialStatement'].get('Cash and cash equivalents (IFRS)'):
+        pass
+
     return {
         'fs_disclosure_date': st.get('DisclosedDate'),
         'fs_period_type': st['FinancialStatement'].get('Type of current period, DEI'),
         'fs_current_fiscal_year_end': st['FinancialStatement'].get('Current fiscal year end date, DEI'),
         'fs_current_assets': current_assets,
+        'fs_current_liabilities': to_float(st['FinancialStatement'].get('Current liabilities (IFRS)') or st['FinancialStatement'].get('Current liabilities')),
         'fs_total_liabilities': total_liabilities,
         'fs_ncav_total': ncav_total,
+        'fs_operating_profit': st['FinancialStatement'].get('Operating profit (loss) (IFRS)'),
+        'fs_bonds_borrowings_current': st['FinancialStatement'].get('Bonds and borrowings - CL (IFRS)'),
+        'fs_bonds_borrowings_noncurrent': st['FinancialStatement'].get('Bonds and borrowings - NCL (IFRS)'),
+        'fs_cash_and_equivalents': st['FinancialStatement'].get('Cash and cash equivalents (IFRS)'),
+        'fs_property': st['FinancialStatement'].get('Property, plant and equipment (IFRS)'),
+        'fs_report_type': st.get('TypeOfDocument'),
+        # for downstream yield calculations
+        'fs_profit_to_owners': fs_profit_to_owners,
+        'fs_gross_debt': to_float(st['FinancialStatement'].get('Bonds and borrowings - CL (IFRS)')) + to_float(st['FinancialStatement'].get('Bonds and borrowings - NCL (IFRS)')),
+        'fs_net_debt': fs_net_debt,
     }
 
 
-def jquant_extract_os(
-        statements: list[dict],
-        analysisdate: str | None = None,
-        max_lookbehind: int = 365) -> dict:
+def jquant_extract_os(statements: list[dict], analysisdate: str | None = None, max_lookbehind: int = 365) -> dict:
     """Get outstanding shares.
 
     inputs:
@@ -197,9 +215,7 @@ Disclosed Financial Statements is for {statements[-1]["DisclosedDate"]}. Skippin
     if not st:  # this happens when the above loop does not find older statement so tehre is nowhere to step one item back. the oldest should be fine
         st = statements[-1]
 
-    shares_outstanding = to_float(
-        st.get('NumberOfIssuedAndOutstandingSharesAtTheEndOfFiscalYearIncludingTreasuryStock')
-    )
+    shares_outstanding = to_float(st.get('NumberOfIssuedAndOutstandingSharesAtTheEndOfFiscalYearIncludingTreasuryStock'))
     total_assets = to_float(st.get('TotalAssets'))
     equity = to_float(st.get('Equity'))
     return {

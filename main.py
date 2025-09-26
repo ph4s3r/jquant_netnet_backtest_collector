@@ -45,7 +45,8 @@ better_exceptions.encoding = 'utf-8'
 # on glacius, log into the var/www folder, otherwise to local logfolder
 LOCAL_LOGDIR = 'jquant_logs/'
 GLACIUS_LOGDIR = r'/var/www/analytics/jquantv3/'
-NETNET_HEADER = 'ticker,analysis_date,ncavps,share_price,mos_rate,fs_date,st_date,fs_st_skew_days\n'
+NETNET_HEADER = 'ticker,analysis_date,ncavps,share_price,mos_rate,roc,market_cap,ey_pe,ey_ev,enterprise_value,fs_date,st_date,fs_st_skew_days,st_report_type,fs_report_type\n'
+
 
 GLACIUS_UUID = 94558092206834
 ELEMENT_UUID = 91765249380
@@ -61,24 +62,31 @@ log_main = get_logger('main')
 log_main.info('-- Running NETNET Backtest --')
 
 analysis_dates = [
-    '2009-02-21',
-    '2010-12-21',
-    '2011-12-21',
-    '2012-12-21',
-    '2013-12-21',
-    '2014-12-21',
-    '2015-12-21',
-    '2016-12-21',
-    '2017-12-21',
-    '2018-12-21',
-    '2019-12-21',
-    '2020-12-21',
-    '2021-12-21',
-    '2022-12-21',
-    '2023-12-21',
-    '2024-12-21',
+    # '2009-02-21',
+    # '2010-12-21',
+    # '2011-12-21',
+    # '2012-12-21',
+    # '2013-12-21',
+    # '2014-12-21',
+    # '2015-12-21',
+    # '2016-12-21',
+    # '2017-12-21',
+    # '2018-12-21',
+    # '2019-12-21',
+    # '2020-12-21',
+    # '2021-12-21',
+    # '2022-12-21',
+    # '2023-12-21',
+    # '2024-12-21',
     '2025-09-20',
 ]
+
+
+def _safe_float(x, default=0.0):
+    try:
+        return float(x)
+    except (TypeError, ValueError):
+        return float(default)
 
 
 async def process_ticker(  # noqa: ANN201, PLR0913
@@ -173,12 +181,104 @@ async def process_ticker(  # noqa: ANN201, PLR0913
                         await f.write(f'{ticker}\n')
                 log_main.warning(f'No OHLC data found for {ticker}, even going {OHLC_LOOKBACK_LIMIT_DAYS} days back...')
                 return
+        else:
+            data_calculated[ticker][analysis_date]['share_price_at_ncav_date'] = ohlc_data_for_ncav_date[0].get('Close', 0.0)
 
         # the asset is netnet if the share price is less than NVACPS_LIMIT * 100 % of the ncavps
         shareprice = data_calculated[ticker][analysis_date].get('share_price_at_ncav_date', 999999)
         MoS_rate = shareprice / data_calculated[ticker][analysis_date]['ncavps']
         data_calculated[ticker][analysis_date]['netnet'] = shareprice < (data_calculated[ticker][analysis_date]['ncavps'] * NCAVPS_LIMIT)
+
         if data_calculated[ticker][analysis_date]['netnet']:
+            try:
+                # earnings yield calculation
+                share_price = data_calculated[ticker][analysis_date].get('share_price_at_ncav_date')
+                shares_out = data_calculated[ticker][analysis_date].get('st_NumberOfIssuedAndOutstandingSharesAtTheEndOfFiscalYearIncludingTreasuryStock')
+                net_income = data_calculated[ticker][analysis_date].get('fs_profit_to_owners')
+                ebit = data_calculated[ticker][analysis_date].get('fs_operating_profit')
+                net_debt = data_calculated[ticker][analysis_date].get('fs_net_debt')
+
+                # Compute market cap and EV defensively
+                market_cap = None
+                enterprise_value = None
+
+                try:
+                    if share_price and shares_out and float(shares_out) != 0:
+                        market_cap = float(share_price) * float(shares_out)
+                except (TypeError, ValueError):
+                    market_cap = None
+
+                try:
+                    if market_cap is not None and net_debt is not None:
+                        enterprise_value = float(market_cap) + float(net_debt)
+                except (TypeError, ValueError):
+                    enterprise_value = None
+
+                # Earnings yield (P/E-style): Net income / Market cap
+                ey_pe = None
+                try:
+                    if market_cap and float(market_cap) != 0 and net_income is not None:
+                        ey_pe = float(net_income) / float(market_cap)
+                except (TypeError, ValueError, ZeroDivisionError):
+                    ey_pe = None
+
+                # Earnings yield (EV-based): EBIT / EV
+                ey_ev = None
+                try:
+                    if enterprise_value and float(enterprise_value) != 0 and ebit is not None:
+                        ey_ev = float(ebit) / float(enterprise_value)
+                except (TypeError, ValueError, ZeroDivisionError):
+                    ey_ev = None
+
+                # Persist results
+                data_calculated[ticker][analysis_date]['ey_pe'] = ey_pe
+                data_calculated[ticker][analysis_date]['ey_ev'] = ey_ev
+                data_calculated[ticker][analysis_date]['market_cap'] = market_cap
+                data_calculated[ticker][analysis_date]['enterprise_value'] = enterprise_value
+            except Exception as e:
+                log_main.warning(f'error in ey calculation for {ticker=} at {analysis_date=}')
+
+            try:
+                # roc Greenblatt-style proxy
+                # uses fileds:
+                # - fs_current_assets
+                # - fs_current_liabilities
+                # - fs_cash_and_equivalents
+                # - fs_property
+                # - fs_operating_profit
+
+                current_assets = data_calculated[ticker][analysis_date].get('fs_current_assets')
+                current_liabilities_val = data_calculated[ticker][analysis_date].get('fs_current_liabilities', None)
+                cash_eq = _safe_float(data_calculated[ticker][analysis_date].get('fs_cash_and_equivalents'), 0.0)
+                ppe = _safe_float(data_calculated[ticker][analysis_date].get('fs_property'), 0.0)
+                operating_profit = data_calculated[ticker][analysis_date].get('fs_operating_profit', None)
+
+                roc = None
+                try:
+                    # Only proceed if we actually have current liabilities and operating profit
+                    if current_liabilities_val is not None and operating_profit is not None:
+                        current_liabilities = _safe_float(current_liabilities_val, 0.0)
+                        op_profit = _safe_float(operating_profit, None)
+
+                        if op_profit is not None:
+                            # Operating NWC excludes cash
+                            nwc_oper = current_assets - current_liabilities - cash_eq
+                            capital_base = nwc_oper + ppe
+
+                            denom = float(capital_base)
+                            if denom > 0.0:
+                                roc = op_profit / denom
+                            else:
+                                roc = None
+                except Exception:
+                    roc = None
+
+                # Persist ROC result
+                data_calculated[ticker][analysis_date]['roc'] = roc
+            except Exception as e:
+                log_main.warning(f'error in roc calculation for {ticker=} at {analysis_date=}')
+
+            # write the netnet csv data
             log_main.info('netnet stock found!')
             netnet_fname = f'{ULTIMATE_LOGDIR}/tse_netnets_{analysis_date}.csv'
             async with netnet_lock:
@@ -187,7 +287,21 @@ async def process_ticker(  # noqa: ANN201, PLR0913
                     if not netnet_file_exists:
                         await f.write(NETNET_HEADER)
                     await f.write(
-                        f'{ticker},{analysis_date},{data_calculated[ticker][analysis_date]["ncavps"]:.2f},{shareprice},{MoS_rate:.2f},{ncavdatadate},{st_disclosure_date},{data_calculated[ticker][analysis_date]["fs_st_skew_days"]}\n'
+                        f'{ticker},'
+                        f'{analysis_date},'
+                        f'{data_calculated[ticker][analysis_date]["ncavps"]:.2f},'
+                        f'{shareprice},'
+                        f'{MoS_rate:.2f},'
+                        f'{data_calculated[ticker][analysis_date]["roc"]},'
+                        f'{data_calculated[ticker][analysis_date]["market_cap"]},'
+                        f'{data_calculated[ticker][analysis_date]["ey_pe"]},'
+                        f'{data_calculated[ticker][analysis_date]["ey_ev"]},'
+                        f'{data_calculated[ticker][analysis_date]["enterprise_value"]},'
+                        f'{ncavdatadate},'
+                        f'{st_disclosure_date},'
+                        f'{data_calculated[ticker][analysis_date].get("fs_st_skew_days", "")},'
+                        f'{data_calculated[ticker][analysis_date]["st_report_type"]},'
+                        f'{data_calculated[ticker][analysis_date]["fs_report_type"]}\n'
                     )
             log_main.debug(f'Wrote netnet data for {ticker}')
 
@@ -220,10 +334,7 @@ async def main() -> None:
             tickers_processed_counter['count'] += 1
 
         tasks = [counted_process_ticker(t) for t in tickers[analysis_date]]
-        periodic_logger_task = asyncio.create_task(periodic_perf_logger(
-            60, perf_log_file, analysis_date, SEMAPHORE_LIMIT, tickers_processed_counter, stop_event
-            )
-        )
+        periodic_logger_task = asyncio.create_task(periodic_perf_logger(60, perf_log_file, analysis_date, SEMAPHORE_LIMIT, tickers_processed_counter, stop_event))
 
         await asyncio.gather(*tasks)
         stop_event.set()
@@ -232,9 +343,7 @@ async def main() -> None:
         duration = time.time() - start_time
         tpm = len(tasks) / (duration / 60) if duration > 0 else 0
         async with aiofiles.open(perf_log_file, 'a', encoding='utf-8') as f:
-            await f.write(
-                f'{analysis_date},{SEMAPHORE_LIMIT},{tickers_processed_counter["count"]},{duration:.2f},{tpm:.2f}\n'
-            )
+            await f.write(f'{analysis_date},{SEMAPHORE_LIMIT},{tickers_processed_counter["count"]},{duration:.2f},{tpm:.2f}\n')
         log_main.info(f'*** Finished run for analysis date: {analysis_date} ***')
 
     log_main.info('-- Finished NETNET Backtest --')
