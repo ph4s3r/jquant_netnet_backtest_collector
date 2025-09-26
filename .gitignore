@@ -4,3 +4,4 @@ __pycache__
 .ruff_cache
 jquant_logs/
 jquant_tickers/
+sample_data/statements.json

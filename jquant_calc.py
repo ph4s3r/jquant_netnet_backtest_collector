@@ -15,18 +15,13 @@ from structlogger import get_logger
 
 log_calc = get_logger('calc')
 
-# the financial statements we work with
-FINANCIAL_STATEMENT_TYPES = {
-    '1QFinancialStatements_Consolidated_JP',
-    '2QFinancialStatements_Consolidated_JP',
-    '3QFinancialStatements_Consolidated_JP',
-    'FYFinancialStatements_Consolidated_JP',
-}
-
 
 def filter_financial_statements(statements: list[dict]) -> list[dict]:
-    """Filter out non-financial-statement documents."""
-    return [s for s in statements if s.get('TypeOfDocument') in FINANCIAL_STATEMENT_TYPES]
+    """Drop non-financial-statement documents like forecasts etc.
+
+    https://jpx.gitbook.io/j-quants-en/api-reference/statements/typeofdocument
+    """
+    return [s for s in statements if s.get('TypeOfDocument') and 'FinancialStatements' in s.get('TypeOfDocument')]
 
 
 def to_float(v: Any) -> float:
