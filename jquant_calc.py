@@ -6,7 +6,7 @@
 """
 
 # built-in
-from typing import Any
+from typing import Any, LiteralString
 from operator import methodcaller
 from datetime import date, timedelta
 
@@ -14,6 +14,41 @@ from datetime import date, timedelta
 from structlogger import get_logger
 
 log_calc = get_logger('calc')
+
+# these are for possible later use to add not-immediately-liquid cash-like assets to roc and ev calc.
+cash_fields = [
+    'Cash and deposits',
+    'Segregated deposits - CA - SEC',
+    'Cash collateral provided for securities borrowed - CA - SEC',
+    'Cash collateral provided for securities borrowed in margin transactions - CA - SEC',
+    'Short-term loans receivable',
+    'Loans secured by securities-CA-SEC',
+    'Margin transaction assets-CA-SEC',
+    'Margin loans - CA - SEC',
+]
+
+def _get_gross_debt_and_sources(st) -> tuple[float, LiteralString | None]:
+    """Helper to sum gross debt and collect contributing fields."""
+    debt_fields = [
+        'Short-term borrowings',
+        'Current portion of long-term borrowings',
+        'Long-term borrowings',
+        'Bonds payable',
+        'Current portion of bonds payable',
+        'Margin borrowings - CL - SEC',  # optional, set to 0 if you don't want to include
+        'Lease liabilities - CL',  # optional, see comment above
+        'Lease liabilities - NCL',  # optional
+    ]
+
+    total = 0.0
+    used_fields = []
+    for f in debt_fields:
+        v = to_float(st['FinancialStatement'].get(f))
+        if v:  # only add non-empty
+            total += v
+            used_fields.append(f)
+
+    return total, ';'.join(used_fields) if used_fields else None
 
 
 def filter_financial_statements(statements: list[dict]) -> list[dict]:
@@ -32,7 +67,7 @@ def to_float(v: Any) -> float:
         return 0.0
 
 
-def jquant_calculate_ncav(fs_details: list[dict], analysisdate: str | None = None, max_lookbehind: int = 365) -> dict:
+def jquant_calculate_ncav(fs_details: list[dict], analysisdate: str | None = None, max_lookbehind: int = 365, global_fs_keys = None) -> dict:
     """Calculate NCAV (Net Current Asset Value) from J-Quants fs_details endpoint.
 
     inputs:
@@ -119,18 +154,13 @@ Disclosed Financial Statements is for {fs_details[-1]["DisclosedDate"]}. Skippin
         st['FinancialStatement'].get('Profit (loss) attributable to owners of parent (IFRS)') or st['FinancialStatement'].get('Profit (loss) attributable to owners of parent')
         )
 
-    fs_net_debt = (
-            to_float(st['FinancialStatement'].get('Bonds and borrowings - CL (IFRS)'))
-            + to_float(st['FinancialStatement'].get('Bonds and borrowings - NCL (IFRS)'))
-            - to_float(st['FinancialStatement'].get('Cash and cash equivalents (IFRS)'))
-        )
+    fs_gross_debt, fs_gross_debt_fields = _get_gross_debt_and_sources(st)
 
     # TODO: remove this after knowing the possible key names
-    if any('Bonds and borrowings' in key for key in st['FinancialStatement']):
-        pass
+    # search for any field bonds and borrowings
 
-    if st['FinancialStatement'].get('Bonds and borrowings - CL (IFRS)') or st['FinancialStatement'].get('Bonds and borrowings - NCL (IFRS)') or st['FinancialStatement'].get('Cash and cash equivalents (IFRS)'):
-        pass
+    if global_fs_keys:
+        global_fs_keys.update(st['FinancialStatement'])
 
     return {
         'fs_disclosure_date': st.get('DisclosedDate'),
@@ -140,16 +170,16 @@ Disclosed Financial Statements is for {fs_details[-1]["DisclosedDate"]}. Skippin
         'fs_current_liabilities': to_float(st['FinancialStatement'].get('Current liabilities (IFRS)') or st['FinancialStatement'].get('Current liabilities')),
         'fs_total_liabilities': total_liabilities,
         'fs_ncav_total': ncav_total,
-        'fs_operating_profit': st['FinancialStatement'].get('Operating profit (loss) (IFRS)'),
+        'fs_operating_profit': st['FinancialStatement'].get('Operating profit (loss) (IFRS)') or st['FinancialStatement'].get('Operating profit (loss)'),
         'fs_bonds_borrowings_current': st['FinancialStatement'].get('Bonds and borrowings - CL (IFRS)'),
         'fs_bonds_borrowings_noncurrent': st['FinancialStatement'].get('Bonds and borrowings - NCL (IFRS)'),
-        'fs_cash_and_equivalents': st['FinancialStatement'].get('Cash and cash equivalents (IFRS)'),
-        'fs_property': st['FinancialStatement'].get('Property, plant and equipment (IFRS)'),
+        'fs_cash_and_equivalents': st['FinancialStatement'].get('Cash and deposits'),
+        'fs_property': st['FinancialStatement'].get('Property, plant and equipment (IFRS)') or st['FinancialStatement'].get('Property, plant and equipment'),
         'fs_report_type': st.get('TypeOfDocument'),
         # for downstream yield calculations
         'fs_profit_to_owners': fs_profit_to_owners,
-        'fs_gross_debt': to_float(st['FinancialStatement'].get('Bonds and borrowings - CL (IFRS)')) + to_float(st['FinancialStatement'].get('Bonds and borrowings - NCL (IFRS)')),
-        'fs_net_debt': fs_net_debt,
+        'fs_gross_debt': fs_gross_debt,
+        'fs_gross_debt_fields': fs_gross_debt_fields,
     }
 
 

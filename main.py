@@ -45,8 +45,9 @@ better_exceptions.encoding = 'utf-8'
 # on glacius, log into the var/www folder, otherwise to local logfolder
 LOCAL_LOGDIR = 'jquant_logs/'
 GLACIUS_LOGDIR = r'/var/www/analytics/jquantv3/'
-NETNET_HEADER = 'ticker,analysis_date,ncavps,share_price,mos_rate,roc,market_cap,ey_pe,ey_ev,enterprise_value,fs_date,st_date,fs_st_skew_days,st_report_type,fs_report_type\n'
-
+NETNET_HEADER = (
+    'ticker,analysis_date,ncavps,share_price,mos_rate,market_cap,enterprise_value,ey_shares_out,ey_net_income,operating_profit,ey_gross_debt,ey_pe,ey_ev,roc_current_assets,roc_current_liabilities,roc_cash_and_equivalents,roc_property,roc_nwc_oper,roc_capital_base,roc,fs_gross_debt_fields,fs_date,st_date,fs_st_skew_days,st_report_type,fs_report_type\n'
+)
 
 GLACIUS_UUID = 94558092206834
 ELEMENT_UUID = 91765249380
@@ -81,8 +82,9 @@ analysis_dates = [
     '2025-09-20',
 ]
 
+global_fs_keys = set()
 
-def _safe_float(x, default=0.0):
+def _safe_float(x, default=0.0) -> float:
     try:
         return float(x)
     except (TypeError, ValueError):
@@ -113,6 +115,7 @@ async def process_ticker(  # noqa: ANN201, PLR0913
                 fs_details=fs_details[ticker],
                 analysisdate=analysis_date,
                 max_lookbehind=FS_LOOKBACK_LIMIT_DAYS,
+                # global_fs_keys=global_fs_keys
             )
             if not ncav_data:
                 return
@@ -195,8 +198,9 @@ async def process_ticker(  # noqa: ANN201, PLR0913
                 share_price = data_calculated[ticker][analysis_date].get('share_price_at_ncav_date')
                 shares_out = data_calculated[ticker][analysis_date].get('st_NumberOfIssuedAndOutstandingSharesAtTheEndOfFiscalYearIncludingTreasuryStock')
                 net_income = data_calculated[ticker][analysis_date].get('fs_profit_to_owners')
-                ebit = data_calculated[ticker][analysis_date].get('fs_operating_profit')
-                net_debt = data_calculated[ticker][analysis_date].get('fs_net_debt')
+                operating_profit = _safe_float(data_calculated[ticker][analysis_date].get('fs_operating_profit'))
+                gross_debt = data_calculated[ticker][analysis_date].get('fs_gross_debt')
+                cash_eq = _safe_float(data_calculated[ticker][analysis_date].get('fs_cash_and_equivalents'), 0.0)
 
                 # Compute market cap and EV defensively
                 market_cap = None
@@ -209,8 +213,8 @@ async def process_ticker(  # noqa: ANN201, PLR0913
                     market_cap = None
 
                 try:
-                    if market_cap is not None and net_debt is not None:
-                        enterprise_value = float(market_cap) + float(net_debt)
+                    if market_cap:
+                        enterprise_value = float(market_cap) - cash_eq + gross_debt
                 except (TypeError, ValueError):
                     enterprise_value = None
 
@@ -225,8 +229,8 @@ async def process_ticker(  # noqa: ANN201, PLR0913
                 # Earnings yield (EV-based): EBIT / EV
                 ey_ev = None
                 try:
-                    if enterprise_value and float(enterprise_value) != 0 and ebit is not None:
-                        ey_ev = float(ebit) / float(enterprise_value)
+                    if enterprise_value and float(enterprise_value) != 0 and operating_profit is not None:
+                        ey_ev = float(operating_profit) / float(enterprise_value)
                 except (TypeError, ValueError, ZeroDivisionError):
                     ey_ev = None
 
@@ -235,6 +239,11 @@ async def process_ticker(  # noqa: ANN201, PLR0913
                 data_calculated[ticker][analysis_date]['ey_ev'] = ey_ev
                 data_calculated[ticker][analysis_date]['market_cap'] = market_cap
                 data_calculated[ticker][analysis_date]['enterprise_value'] = enterprise_value
+                # Persist EY inputs
+                data_calculated[ticker][analysis_date]['ey_shares_out'] = shares_out
+                data_calculated[ticker][analysis_date]['ey_net_income'] = net_income
+                data_calculated[ticker][analysis_date]['operating_profit'] = operating_profit
+                data_calculated[ticker][analysis_date]['ey_gross_debt'] = gross_debt
             except Exception as e:
                 log_main.warning(f'error in ey calculation for {ticker=} at {analysis_date=}')
 
@@ -249,34 +258,35 @@ async def process_ticker(  # noqa: ANN201, PLR0913
 
                 current_assets = data_calculated[ticker][analysis_date].get('fs_current_assets')
                 current_liabilities_val = data_calculated[ticker][analysis_date].get('fs_current_liabilities', None)
-                cash_eq = _safe_float(data_calculated[ticker][analysis_date].get('fs_cash_and_equivalents'), 0.0)
                 ppe = _safe_float(data_calculated[ticker][analysis_date].get('fs_property'), 0.0)
-                operating_profit = data_calculated[ticker][analysis_date].get('fs_operating_profit', None)
 
                 roc = None
                 try:
                     # Only proceed if we actually have current liabilities and operating profit
                     if current_liabilities_val is not None and operating_profit is not None:
                         current_liabilities = _safe_float(current_liabilities_val, 0.0)
-                        op_profit = _safe_float(operating_profit, None)
 
-                        if op_profit is not None:
-                            # Operating NWC excludes cash
+                        if operating_profit is not None:
+                            # Operating net working capital excludes cash
                             nwc_oper = current_assets - current_liabilities - cash_eq
                             capital_base = nwc_oper + ppe
 
                             denom = float(capital_base)
-                            if denom > 0.0:
-                                roc = op_profit / denom
-                            else:
-                                roc = None
+                            roc = operating_profit / denom if denom > 0.0 else None
                 except Exception:
                     roc = None
 
-                # Persist ROC result
+                # Persist ROC result and inputs
                 data_calculated[ticker][analysis_date]['roc'] = roc
+                data_calculated[ticker][analysis_date]['roc_current_assets'] = current_assets
+                data_calculated[ticker][analysis_date]['roc_current_liabilities'] = current_liabilities if 'current_liabilities' in locals() else None
+                data_calculated[ticker][analysis_date]['roc_cash_and_equivalents'] = cash_eq
+                data_calculated[ticker][analysis_date]['roc_property'] = ppe
+                data_calculated[ticker][analysis_date]['operating_profit'] = operating_profit
+                data_calculated[ticker][analysis_date]['roc_nwc_oper'] = nwc_oper if 'nwc_oper' in locals() else None
+                data_calculated[ticker][analysis_date]['roc_capital_base'] = capital_base if 'capital_base' in locals() else None
             except Exception as e:
-                log_main.warning(f'error in roc calculation for {ticker=} at {analysis_date=}')
+                log_main.warning(f'error in roc calculation for {ticker=} at {analysis_date=}. \r\n{e}')
 
             # write the netnet csv data
             log_main.info('netnet stock found!')
@@ -292,11 +302,22 @@ async def process_ticker(  # noqa: ANN201, PLR0913
                         f'{data_calculated[ticker][analysis_date]["ncavps"]:.2f},'
                         f'{shareprice},'
                         f'{MoS_rate:.2f},'
-                        f'{data_calculated[ticker][analysis_date]["roc"]},'
                         f'{data_calculated[ticker][analysis_date]["market_cap"]},'
+                        f'{data_calculated[ticker][analysis_date]["enterprise_value"]},'
+                        f'{data_calculated[ticker][analysis_date].get("ey_shares_out", "")},'
+                        f'{data_calculated[ticker][analysis_date].get("ey_net_income", "")},'
+                        f'{data_calculated[ticker][analysis_date].get("operating_profit", "")},'
+                        f'{data_calculated[ticker][analysis_date].get("ey_gross_debt", "")},'
                         f'{data_calculated[ticker][analysis_date]["ey_pe"]},'
                         f'{data_calculated[ticker][analysis_date]["ey_ev"]},'
-                        f'{data_calculated[ticker][analysis_date]["enterprise_value"]},'
+                        f'{data_calculated[ticker][analysis_date].get("roc_current_assets", "")},'
+                        f'{data_calculated[ticker][analysis_date].get("roc_current_liabilities", "")},'
+                        f'{data_calculated[ticker][analysis_date].get("roc_cash_and_equivalents", "")},'
+                        f'{data_calculated[ticker][analysis_date].get("roc_property", "")},'
+                        f'{data_calculated[ticker][analysis_date].get("roc_nwc_oper", "")},'
+                        f'{data_calculated[ticker][analysis_date].get("roc_capital_base", "")},'
+                        f'{data_calculated[ticker][analysis_date]["roc"]},'
+                        f'{data_calculated[ticker][analysis_date].get("fs_gross_debt_fields", "")},'
                         f'{ncavdatadate},'
                         f'{st_disclosure_date},'
                         f'{data_calculated[ticker][analysis_date].get("fs_st_skew_days", "")},'
@@ -304,6 +325,7 @@ async def process_ticker(  # noqa: ANN201, PLR0913
                         f'{data_calculated[ticker][analysis_date]["fs_report_type"]}\n'
                     )
             log_main.debug(f'Wrote netnet data for {ticker}')
+
 
 
 async def main() -> None:
@@ -346,6 +368,7 @@ async def main() -> None:
             await f.write(f'{analysis_date},{SEMAPHORE_LIMIT},{tickers_processed_counter["count"]},{duration:.2f},{tpm:.2f}\n')
         log_main.info(f'*** Finished run for analysis date: {analysis_date} ***')
 
+    log_main.info(f'Global FS keys: {global_fs_keys}')
     log_main.info('-- Finished NETNET Backtest --')
 
 

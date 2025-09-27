@@ -25,6 +25,7 @@ ignore = [
     "D211",     # no-blank-line-before-class
     "D213",     # multi-line-summary-second-line
     # "T201",     # print
+    "E501",     # line too long..
     "G004",      # allow f string in logs (structlog)
     "PLC0206",  # dict keys
     "ANN001",   # allow Any
@@ -38,8 +39,6 @@ ignore = [
     "FBT002",   # Boolean default positional argument in function definition
     "PGH004",   # use top noqa
     ]
-
-extend-select = ["E501"]
 
 # Allow fix for all enabled rules (when `--fix`) is provided.
 fixable = [
