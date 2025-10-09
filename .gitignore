@@ -5,3 +5,4 @@ __pycache__
 jquant_logs/
 jquant_tickers/
 sample_data/statements.json
+/collector_logs

@@ -1,10 +1,11 @@
 [project]
-name = "dinnyesmerci"
+name = "jquant-collector"
 version = "0.1.0"
 requires-python = ">=3.13"
 dependencies = [
     "aiofiles>=24.1.0",
     "better-exceptions>=0.3.3",
+    "dill>=0.4.0",
     "httpx>=0.28.1",
     "pandas>=2.3.2",
     "python-dotenv>=1.1.1",
