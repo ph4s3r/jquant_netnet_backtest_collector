@@ -2,6 +2,7 @@
 import dill
 
 # built-in
+import sys
 import time
 import pickle
 from pathlib import Path
@@ -11,11 +12,11 @@ from collections import defaultdict
 from structlogger import configure_logging, get_logger
 
 # directories
-INPUT_DATA_PATH_PICKLE = 'data/fs_st_div.pkl'
-INPUT_DATA_PATH_DILL = 'data/fs_st_div.dill'
+INPUT_DATA_PATH_PICKLE = 'data/ohlc.pkl'
+# INPUT_DATA_PATH_DILL = 'data/fs_st_div.dill'
 
 # logging
-configure_logging(log_dir='logs')
+configure_logging(mode='console')
 log_main = get_logger(name='loader')
 
 # aux functions
@@ -66,10 +67,14 @@ if __name__ == '__main__':
     # --- Example of loading data back ---
     log_main.info('--- Verifying saved data ---')
     loaded_pickle = pickle_load(INPUT_DATA_PATH_PICKLE)
-    log_main.info(f'Pickle loaded {len(loaded_pickle)} records.')
+    if loaded_pickle:
+        log_main.info(f'Pickle loaded {len(loaded_pickle)} records.')
+    else:
+        log_main.error(f'Cannot load pickle data from {INPUT_DATA_PATH_PICKLE}.')
+        sys.exit()
 
-    loaded_dill = dill_load(INPUT_DATA_PATH_DILL)
-    if loaded_dill:
-        log_main.info(f'Dill loaded {len(loaded_dill)} records.')
+    # loaded_dill = dill_load(INPUT_DATA_PATH_DILL)
+    # if loaded_dill:
+    #     log_main.info(f'Dill loaded {len(loaded_dill)} records.')
 
     pass
